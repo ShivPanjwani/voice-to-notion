@@ -41,3 +41,6 @@ ENV/
 # Temporary files
 tmp/
 temp/
+
+# macOS
+.DS_Store

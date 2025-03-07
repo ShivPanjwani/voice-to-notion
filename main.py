@@ -85,32 +85,49 @@ def process_transcript():
     print("Process Transcript")
     print("=" * 50)
     
-    # Get transcript from user
-    transcript_path = input("\nEnter the path to your transcript file: ")
-    
-    try:
-        with open(transcript_path, 'r') as f:
-            transcript = f.read()
-        
-        print("\nTranscript loaded successfully.")
-        
-        # Extract tasks from transcript
-        print("\nExtracting tasks...")
-        task_operations = extract_tasks(transcript)
-        
-        if task_operations:
-            # Process task operations
-            results = handle_task_operations(task_operations)
-            
-            # Print formatted summary
-            print(format_operation_summary(results))
+    # Ask user for input method
+    while True:
+        choice = input("\nDo you want to [1] provide a file path or [2] paste the transcript directly? (1/2): ")
+        if choice == "1":
+            # Get transcript from file
+            transcript_path = input("\nEnter the path to your transcript file: ")
+            try:
+                with open(transcript_path, 'r') as f:
+                    transcript = f.read()
+                print("\nTranscript loaded successfully.")
+            except FileNotFoundError:
+                print(f"\nError: File '{transcript_path}' not found.")
+                return
+            except Exception as e:
+                print(f"\nError: {str(e)}")
+                return
+            break
+        elif choice == "2":
+            # Get transcript from user input
+            print("\nPaste your transcript below and press Enter twice when done:")
+            lines = []
+            while True:
+                line = input()
+                if line.strip() == "":
+                    break
+                lines.append(line)
+            transcript = "\n".join(lines)
+            break
         else:
-            print("\nNo task operations found in the transcript.")
+            print("Invalid choice. Please enter 1 or 2.")
+    
+    # Process the transcript
+    print("\nExtracting tasks...")
+    task_operations = extract_tasks(transcript)
+    
+    if task_operations:
+        # Process task operations
+        results = handle_task_operations(task_operations)
         
-    except FileNotFoundError:
-        print(f"\nError: File '{transcript_path}' not found.")
-    except Exception as e:
-        print(f"\nError: {str(e)}")
+        # Print formatted summary
+        print(format_operation_summary(results))
+    else:
+        print("\nNo task operations found in the transcript.")
 
 def record_meeting():
     """Record and process a meeting"""

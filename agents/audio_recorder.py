@@ -1,6 +1,11 @@
+"""
+Audio Recorder Module for Voice-to-Notion
+--------------------------------------------
+This module handles the recording of audio input from the microphone.
+"""
+
 import speech_recognition as sr
 import io
-import wave
 
 def record_audio():
     """
@@ -15,19 +20,17 @@ def record_audio():
 
     try:
         with sr.Microphone() as source:
-            print("\n🎤 Speak now... (Recording will stop after 2s of silence)")
-            print("Adjusting for ambient noise... Please wait...")
+            print("\n🎤 Recording... (Will stop after 2s of silence)")
             
-            recognizer.adjust_for_ambient_noise(source, duration=2)
-            print(f"Energy threshold set to {recognizer.energy_threshold}")
-
-            print("\nListening...")
+            # Skip ambient noise message
+            recognizer.adjust_for_ambient_noise(source, duration=1)
+            
             audio = recognizer.listen(
                 source,
                 timeout=15,            # 15 seconds to start speaking
                 phrase_time_limit=600   # 600 seconds of speech allowed
             )
-            print("⏳ Audio captured, processing...")
+            print("✅ Recording complete")
             
             # Prepare audio data for Whisper
             wav_data = audio.get_wav_data()

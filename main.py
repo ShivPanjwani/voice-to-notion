@@ -7,10 +7,12 @@ A tool that extracts tasks from meeting transcripts or live meetings and adds th
 
 import os
 import sys
-import openai
 from utils.config_manager import ConfigManager
 from utils.setup_wizard import run_setup_wizard
 from agents.audio_recorder import record_audio
+from agents.transcription import transcribe_audio
+from agents.task_extractor import extract_tasks
+from api.notion_handler import handle_task_operations
 
 def main():
     """Main application entry point"""
@@ -23,10 +25,12 @@ def main():
         run_setup_wizard()
     
     # Initialize config manager
-    config = ConfigManager()
-    
-    # Set up OpenAI API key
-    openai.api_key = config.get_openai_api_key()
+    try:
+        config = ConfigManager()
+    except ValueError as e:
+        print(f"\n❌ Configuration Error: {str(e)}")
+        print("Please run the setup wizard again to configure your environment.")
+        sys.exit(1)
     
     # Ask user if they want to process a transcript or record a meeting
     while True:
@@ -39,6 +43,41 @@ def main():
             break
         else:
             print("Invalid choice. Please enter 1 or 2.")
+
+def format_operation_summary(results):
+    """Format operation results into a clean summary"""
+    if not results:
+        return "No operations performed."
+    
+    success_count = sum(1 for result in results if result.get("success", False))
+    
+    summary = f"\n✅ Successfully performed {success_count} of {len(results)} operations:\n"
+    
+    for result in results:
+        task_name = result.get("task", "Unknown task")
+        operation = result.get("operation", "unknown")
+        success = result.get("success", False)
+        
+        # Format the operation description
+        if operation == "create":
+            description = "New task created"
+        elif operation == "update":
+            description = "Task updated"
+        elif operation == "delete":
+            description = "Task deleted"
+        elif operation == "comment":
+            description = "Comment added"
+        elif operation == "rename":
+            description = "Task renamed"
+        else:
+            description = f"Unknown operation: {operation}"
+        
+        # Add status indicator
+        status = "✅" if success else "❌"
+        
+        summary += f"{status} {task_name} - {description}\n"
+    
+    return summary
 
 def process_transcript():
     """Process an existing transcript"""
@@ -54,8 +93,19 @@ def process_transcript():
             transcript = f.read()
         
         print("\nTranscript loaded successfully.")
-        print("\nThis feature is not yet implemented.")
-        # TODO: Implement transcript processing
+        
+        # Extract tasks from transcript
+        print("\nExtracting tasks...")
+        task_operations = extract_tasks(transcript)
+        
+        if task_operations:
+            # Process task operations
+            results = handle_task_operations(task_operations)
+            
+            # Print formatted summary
+            print(format_operation_summary(results))
+        else:
+            print("\nNo task operations found in the transcript.")
         
     except FileNotFoundError:
         print(f"\nError: File '{transcript_path}' not found.")
@@ -73,8 +123,25 @@ def record_meeting():
     
     if audio_buffer:
         print("\nTranscribing audio...")
-        # TODO: Implement audio transcription
-        print("\nThis feature is not yet implemented.")
+        transcript = transcribe_audio(audio_buffer)
+        
+        if transcript:
+            print("\n🎯 Processing Tasks from Transcript...")
+            
+            # Extract tasks from transcript
+            print("\nExtracting tasks...")
+            task_operations = extract_tasks(transcript)
+            
+            if task_operations:
+                # Process task operations
+                results = handle_task_operations(task_operations)
+                
+                # Print formatted summary
+                print(format_operation_summary(results))
+            else:
+                print("\nNo task operations found in the transcript.")
+        else:
+            print("\nTranscription failed.")
     else:
         print("\nNo audio recorded. Exiting.")
 

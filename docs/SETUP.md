@@ -15,8 +15,31 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## API Configuration
+## Notion Setup
+1. Create a Notion account if you don't have one
+2. Duplicate our template board: [Notion Template](https://veiled-basin-65e.notion.site/1969ba40539780f3bb43d57f257d3152?v=1969ba405397819fad37000c36773c94&pvs=4)
+   - Click "Duplicate" in the top right corner
+   - Select a workspace to copy to
 
+3. Create a Notion integration:
+   - Go to https://www.notion.so/my-integrations
+   - Click "New integration"
+   - Name it "Voice-to-Notion"
+   - Copy the API key
+
+4. Connect your board to the integration:
+   - Open your duplicated board
+   - Click "..." in the top right
+   - Select "Add connections"
+   - Choose your "Voice-to-Notion" integration
+
+5. Get your database ID:
+   - In your duplicated board, click "Share" in top right
+   - Copy the link
+   - The database ID is the string of characters between the last "/" and "?"
+   - Example: from "workspace/1234abcd..." the ID would be "1234abcd"
+
+## Environment Setup
 1. Create a `.env` file in the root directory:
 ```bash
 touch .env
@@ -26,15 +49,10 @@ touch .env
 ```
 OPENAI_API_KEY=your_openai_api_key
 NOTION_API_KEY=your_notion_api_key
-NOTION_DATABASE_ID=1969ba40539780f3bb43d57f257d3152
+NOTION_DATABASE_ID=your_database_id
 ```
 
-To obtain API keys:
-- OpenAI API Key: Visit https://platform.openai.com/api-keys
-- Notion API Key: Visit https://www.notion.so/my-integrations
-
-## Testing Base Installation
-
+## Testing Your Setup
 ```bash
 # Run the application
 python main.py

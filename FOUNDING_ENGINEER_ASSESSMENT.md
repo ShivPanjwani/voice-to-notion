@@ -7,6 +7,7 @@ This engineering assessment evaluates your potential as a founding engineer thro
 
 ### Level 1: Research Analysis
 - Analyze the introduction section of our referenced paper on multi-agentic AI systems
+https://arxiv.org/pdf/2502.05439
 - Provide insights on multi-agentic systems and their practical applications
 - Key questions to address:
   * What did you learn about multi-agentic systems?

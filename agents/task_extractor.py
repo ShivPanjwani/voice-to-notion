@@ -4,7 +4,7 @@ import json
 import re
 import os
 from datetime import datetime
-from api.notion_handler import fetch_tasks, fetch_users, format_board_state
+from api.notion_handler import fetch_tasks, fetch_users, format_board_state, fetch_epics
 
 def extract_tasks(transcription):
     """Extract tasks and operations from transcription"""
@@ -22,6 +22,10 @@ def extract_tasks(transcription):
         tasks = fetch_tasks()
         board_state = format_board_state(tasks)
         
+        # Fetch existing epics
+        epics = fetch_epics()
+        epic_list = ", ".join([f'"{epic}"' for epic in epics]) if epics else "No epics found"
+        
         prompt = f"""
         Today's date is {current_date}.
 
@@ -31,6 +35,9 @@ def extract_tasks(transcription):
         - "Not started"
         - "In Progress"
         - "Done"
+        
+        Available Epics:
+        {epic_list}
         
         SPOKEN INPUT TO PROCESS:
         "{transcription}"
@@ -46,9 +53,12 @@ def extract_tasks(transcription):
         - "change name of task X to Y"
         - "update the name of X to Y"
         5. Add comments to tasks
+        6. Create or assign epics to tasks (Epics are broad-level categories that group tasks together)
+           - Only create or assign epics when explicitly requested
+           - Do not suggest epics unless asked
 
         Return ONLY a JSON array containing task operations. Each operation should have:
-        - "operation": "create", "update", "delete", "comment", or "rename"
+        - "operation": "create", "update", "delete", "comment", "rename", "create_epic", or "assign_epic"
         - Appropriate fields for that operation type
 
         For rename operations, you MUST include:
@@ -56,11 +66,28 @@ def extract_tasks(transcription):
         - "old_name": "exact existing task name"
         - "new_name": "new task name"
 
+        For epic operations, you MUST include:
+        - "operation": "create_epic" (for new epics) or "assign_epic" (for existing epics)
+        - "task": "exact task name"
+        - "epic": "epic name"
+
         Example rename operation:
         {{
             "operation": "rename",
             "old_name": "Complete Team Competency Evaluation And Gap Analysis",
             "new_name": "Team Competency Analysis"
+        }}
+
+        Example epic operations:
+        {{
+            "operation": "create_epic",
+            "task": "Prepare for ShopTalk",
+            "epic": "ShopTalk"
+        }}
+        {{
+            "operation": "assign_epic",
+            "task": "Prepare for ShopTalk",
+            "epic": "Agilow Product"
         }}
 
         Other operation examples:

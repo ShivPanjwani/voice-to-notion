@@ -89,54 +89,240 @@ def format_board_state(tasks):
     
     return board_state
 
-def handle_task_operations(task_operations):
-    """
-    Process a list of task operations with the Notion API
-    Returns a list of results for each operation
-    """
-    if not task_operations:
-        return []
+def fetch_epics():
+    """Fetch all existing epics from Notion"""
+    notion_api_key = os.getenv("NOTION_API_KEY")
+    notion_database_id = os.getenv("NOTION_DATABASE_ID")
     
+    headers = {
+        "Authorization": f"Bearer {notion_api_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    url = f"https://api.notion.com/v1/databases/{notion_database_id}/query"
+    
+    response = requests.post(url, headers=headers, json={})
+    
+    if response.status_code >= 200 and response.status_code < 300:
+        results = response.json().get("results", [])
+        epics = set()
+        
+        for page in results:
+            if "Select" in page["properties"] and page["properties"]["Select"].get("select"):
+                epic = page["properties"]["Select"]["select"].get("name")
+                if epic:
+                    epics.add(epic)
+        
+        return list(epics)
+    
+    return []
+
+def get_epic_colors():
+    """Get all colors used by existing epics"""
+    notion_api_key = os.getenv("NOTION_API_KEY")
+    notion_database_id = os.getenv("NOTION_DATABASE_ID")
+    
+    headers = {
+        "Authorization": f"Bearer {notion_api_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    url = f"https://api.notion.com/v1/databases/{notion_database_id}/query"
+    
+    response = requests.post(url, headers=headers, json={})
+    
+    if response.status_code >= 200 and response.status_code < 300:
+        results = response.json().get("results", [])
+        used_colors = set()
+        
+        for page in results:
+            if "Select" in page["properties"] and page["properties"]["Select"].get("select"):
+                color = page["properties"]["Select"]["select"].get("color")
+                if color:
+                    used_colors.add(color)
+        
+        return list(used_colors)
+    
+    return []
+
+def get_unique_color(used_colors):
+    """Get a unique color not used by existing epics"""
+    all_colors = [
+        "default", "gray", "brown", "orange", "yellow", 
+        "green", "blue", "purple", "pink", "red"
+    ]
+    
+    available_colors = [color for color in all_colors if color not in used_colors]
+    
+    if available_colors:
+        return available_colors[0]  # Return the first available color
+    else:
+        return "default"  # If all colors are used, default to "default"
+
+def assign_epic_to_task(task_name, epic_name):
+    """Assign an existing epic to a task"""
+    notion_api_key = os.getenv("NOTION_API_KEY")
+    
+    headers = {
+        "Authorization": f"Bearer {notion_api_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    # Find the task by name
+    page_id = find_task_by_name(task_name)
+    
+    if not page_id:
+        print(f"❌ Task not found: {task_name}")
+        return False
+    
+    url = f"https://api.notion.com/v1/pages/{page_id}"
+    
+    data = {
+        "properties": {
+            "Select": {
+                "select": {
+                    "name": epic_name
+                }
+            }
+        }
+    }
+    
+    response = requests.patch(url, headers=headers, json=data)
+    
+    if response.status_code >= 200 and response.status_code < 300:
+        print(f"✅ Assigned epic '{epic_name}' to task: {task_name}")
+        return True
+    else:
+        print(f"❌ Failed to assign epic: {response.text}")
+        return False
+
+def create_epic_for_task(task_name, epic_name):
+    """Create a new epic and assign it to a task"""
+    notion_api_key = os.getenv("NOTION_API_KEY")
+    
+    headers = {
+        "Authorization": f"Bearer {notion_api_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    # Find the task by name
+    page_id = find_task_by_name(task_name)
+    
+    if not page_id:
+        print(f"❌ Task not found: {task_name}")
+        return False
+    
+    # Get used colors to avoid duplicates
+    used_colors = get_epic_colors()
+    unique_color = get_unique_color(used_colors)
+    
+    url = f"https://api.notion.com/v1/pages/{page_id}"
+    
+    data = {
+        "properties": {
+            "Select": {
+                "select": {
+                    "name": epic_name,
+                    "color": unique_color
+                }
+            }
+        }
+    }
+    
+    response = requests.patch(url, headers=headers, json=data)
+    
+    if response.status_code >= 200 and response.status_code < 300:
+        print(f"✅ Created new epic '{epic_name}' with color '{unique_color}' and assigned to task: {task_name}")
+        return True
+    else:
+        print(f"❌ Failed to create epic: {response.text}")
+        return False
+
+def handle_task_operations(task_operations):
+    """Process task operations in Notion"""
     results = []
     
     for operation in task_operations:
-        op_type = operation.get('operation', 'create')
+        op_type = operation.get('operation', '').lower()
         
         try:
             if op_type == 'create':
                 success = create_task(operation)
-                details = "New task created"
+                results.append({
+                    "operation": "create",
+                    "task": operation.get('task', 'Unknown'),
+                    "success": success,
+                    "details": "Task created successfully" if success else "Failed to create task"
+                })
+            
             elif op_type == 'update':
                 success = update_task(operation)
-                # Determine what was updated
-                updated_fields = []
-                if 'status' in operation:
-                    updated_fields.append("status")
-                if 'deadline' in operation:
-                    updated_fields.append("deadline")
-                if 'assignee' in operation:
-                    updated_fields.append("assignee")
-                details = f"Updated {', '.join(updated_fields)}" if updated_fields else "Task updated"
+                results.append({
+                    "operation": "update",
+                    "task": operation.get('task', 'Unknown'),
+                    "success": success,
+                    "details": "Task updated successfully" if success else "Failed to update task"
+                })
+            
             elif op_type == 'delete':
                 success = delete_task(operation)
-                details = "Task deleted"
+                results.append({
+                    "operation": "delete",
+                    "task": operation.get('task', 'Unknown'),
+                    "success": success,
+                    "details": "Task deleted successfully" if success else "Failed to delete task"
+                })
+            
             elif op_type == 'comment':
                 success = add_comment(operation)
-                details = "Comment added"
+                results.append({
+                    "operation": "comment",
+                    "task": operation.get('task', 'Unknown'),
+                    "success": success,
+                    "details": "Comment added successfully" if success else "Failed to add comment"
+                })
+            
             elif op_type == 'rename':
                 success = rename_task(operation)
-                details = f"Renamed from '{operation.get('old_name', 'Unknown')}'"
+                results.append({
+                    "operation": "rename",
+                    "task": operation.get('old_name', 'Unknown'),
+                    "success": success,
+                    "details": "Task renamed successfully" if success else "Failed to rename task"
+                })
+            
+            elif op_type == 'create_epic':
+                success = create_epic_for_task(operation.get('task'), operation.get('epic'))
+                results.append({
+                    "operation": "create_epic",
+                    "task": operation.get('task', 'Unknown'),
+                    "epic": operation.get('epic', 'Unknown'),
+                    "success": success,
+                    "details": "Epic created and assigned successfully" if success else "Failed to create epic"
+                })
+            
+            elif op_type == 'assign_epic':
+                success = assign_epic_to_task(operation.get('task'), operation.get('epic'))
+                results.append({
+                    "operation": "assign_epic",
+                    "task": operation.get('task', 'Unknown'),
+                    "epic": operation.get('epic', 'Unknown'),
+                    "success": success,
+                    "details": "Epic assigned successfully" if success else "Failed to assign epic"
+                })
+            
             else:
-                print(f"⚠️ Unknown operation type: {op_type}")
-                success = False
-                details = "Unknown operation"
-                
-            results.append({
-                "operation": op_type,
-                "task": operation.get('task', operation.get('old_name', 'Unknown')),
-                "success": success,
-                "details": details
-            })
+                print(f"❌ Unknown operation type: {op_type}")
+                results.append({
+                    "operation": op_type,
+                    "task": operation.get('task', 'Unknown'),
+                    "success": False,
+                    "details": "Unknown operation type"
+                })
             
         except Exception as e:
             print(f"❌ Error processing operation {op_type}: {str(e)}")

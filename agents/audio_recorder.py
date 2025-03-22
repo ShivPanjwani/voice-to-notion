@@ -4,43 +4,89 @@ Audio Recorder Module for Voice-to-Notion
 This module handles the recording of audio input from the microphone.
 """
 
-import speech_recognition as sr
-import io
+import pyaudio
+import wave
+import tempfile
+import os
+import threading
+from pynput import keyboard
 
 def record_audio():
     """
-    Records audio using speech_recognition and returns audio buffer for transcription
+    Records audio from the microphone until spacebar is pressed.
+    Returns: Path to the recorded audio file or None.
     """
-    recognizer = sr.Recognizer()
+    # Audio recording parameters
+    FORMAT = pyaudio.paInt16
+    CHANNELS = 1
+    RATE = 16000
+    CHUNK = 1024
     
-    # Audio recording settings
-    recognizer.energy_threshold = 100
-    recognizer.pause_threshold = 2.0    # 2 seconds of silence to stop
-    recognizer.dynamic_energy_threshold = True
-
+    # Create a temporary file to store the audio
+    temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    temp_filename = temp_file.name
+    temp_file.close()
+    
     try:
-        with sr.Microphone() as source:
-            print("\n🎤 Recording... (Will stop after 2s of silence)")
+        # Initialize PyAudio
+        audio = pyaudio.PyAudio()
+        
+        # Open stream
+        stream = audio.open(format=FORMAT, channels=CHANNELS,
+                            rate=RATE, input=True,
+                            frames_per_buffer=CHUNK)
+        
+        print("🎤 Recording... Press spacebar to stop.")
+        
+        frames = []
+        
+        # Create a flag to stop recording
+        stop_recording = threading.Event()
+        
+        # Define the key listener callback
+        def on_press(key):
+            try:
+                if key == keyboard.Key.space:
+                    stop_recording.set()
+                    # Return False to stop listener
+                    return False
+            except AttributeError:
+                pass
+        
+        # Start the keyboard listener in a separate thread
+        listener = keyboard.Listener(on_press=on_press)
+        listener.start()
+        
+        # Record until spacebar is pressed
+        while not stop_recording.is_set():
+            data = stream.read(CHUNK)
+            frames.append(data)
+        
+        print("✅ Recording stopped.")
+        
+        # Stop and close the stream
+        stream.stop_stream()
+        stream.close()
+        audio.terminate()
+        
+        # Save the recorded audio to a WAV file
+        if frames:
+            with wave.open(temp_filename, 'wb') as wf:
+                wf.setnchannels(CHANNELS)
+                wf.setsampwidth(audio.get_sample_size(FORMAT))
+                wf.setframerate(RATE)
+                wf.writeframes(b''.join(frames))
             
-            # Skip ambient noise message
-            recognizer.adjust_for_ambient_noise(source, duration=1)
+            return temp_filename
+        else:
+            print("❌ No audio recorded.")
+            os.unlink(temp_filename)
+            return None
             
-            audio = recognizer.listen(
-                source,
-                timeout=15,            # 15 seconds to start speaking
-                phrase_time_limit=600   # 600 seconds of speech allowed
-            )
-            print("✅ Recording complete")
-            
-            # Prepare audio data for Whisper
-            wav_data = audio.get_wav_data()
-            audio_buffer = io.BytesIO(wav_data)
-            audio_buffer.name = 'audio.wav'
-            return audio_buffer
-            
-    except sr.WaitTimeoutError:
-        print("⏹️ No speech detected within timeout period.")
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
-
-    return None
+        print(f"❌ Recording error: {str(e)}")
+        try:
+            os.unlink(temp_filename)
+        except:
+            pass
+        return None

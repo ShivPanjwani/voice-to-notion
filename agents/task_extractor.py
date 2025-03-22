@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 from api.notion_handler import fetch_tasks, fetch_users, format_board_state, fetch_epics
 
-def extract_tasks(transcription):
+def extract_tasks(transcription, is_streaming=False):
     """Extract tasks and operations from transcription"""
     if not transcription:
         print("❌ No transcription provided.")
@@ -26,6 +26,16 @@ def extract_tasks(transcription):
         epics = fetch_epics()
         epic_list = ", ".join([f'"{epic}"' for epic in epics]) if epics else "No epics found"
         
+        # Additional context for streaming mode
+        streaming_context = """
+        IMPORTANT STREAMING INSTRUCTIONS:
+        You are processing a live audio stream that may contain partial sentences or incomplete thoughts.
+        - Only extract tasks when you are confident the speaker has finished expressing the complete task
+        - If a sentence seems cut off or incomplete, DO NOT extract a task from it
+        - Wait for more context in future chunks before making decisions on ambiguous statements
+        - Prioritize precision over recall - it's better to miss a task than to create an incorrect one
+        """ if is_streaming else ""
+        
         prompt = f"""
         Today's date is {current_date}.
 
@@ -39,10 +49,12 @@ def extract_tasks(transcription):
         Available Epics:
         {epic_list}
         
+        {streaming_context}
+        
         SPOKEN INPUT TO PROCESS:
         "{transcription}"
 
-        You are a project management AI. Your role is to extract task operations from spoken input and/or user provided transcription from user's meeetings. 
+        You are a project management AI. Your role is to extract task operations from spoken input and/or user provided transcription from user's meetings. 
         1. Create new tasks
         2. Update existing tasks
         3. Delete tasks when requested
@@ -111,11 +123,12 @@ def extract_tasks(transcription):
         """
 
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o",
             messages=[
-                {"role": "system", "content": "You are a task extraction AI. Extract tasks from spoken input."},
+                {"role": "system", "content": "You are a project management AI. Extract tasks from spoken input."},
                 {"role": "user", "content": prompt}
-            ]
+            ],
+            temperature=0.1
         )
         
         result = response.choices[0].message.content.strip()
@@ -126,7 +139,28 @@ def extract_tasks(transcription):
         try:
             tasks = json.loads(result)
             if isinstance(tasks, list):
-                # Simplified output - no need to print number of tasks
+                # Print the extracted operations
+                if tasks:
+                    print(f"\n📋 Extracted {len(tasks)} task operations:")
+                    for i, op in enumerate(tasks, 1):
+                        op_type = op.get("operation", "unknown")
+                        if op_type == "create":
+                            print(f"  {i}. Create: {op.get('task', 'unknown')}")
+                        elif op_type == "delete":
+                            print(f"  {i}. Delete: {op.get('task', 'unknown')}")
+                        elif op_type == "update":
+                            print(f"  {i}. Update: {op.get('task', 'unknown')} - {', '.join([f'{k}: {v}' for k, v in op.items() if k not in ['operation', 'task']])}")
+                        elif op_type == "rename":
+                            print(f"  {i}. Rename: {op.get('old_name', 'unknown')} → {op.get('new_name', 'unknown')}")
+                        elif op_type == "create_epic":
+                            print(f"  {i}. Create Epic: {op.get('epic', 'unknown')}")
+                        elif op_type == "assign_epic":
+                            print(f"  {i}. Assign Epic: {op.get('task', 'unknown')} to {op.get('epic', 'unknown')}")
+                        else:
+                            print(f"  {i}. {op_type.capitalize()}: {op}")
+                else:
+                    print("\n📋 No task operations extracted.")
+                
                 return tasks
             else:
                 print("❌ Invalid response format: not a list")

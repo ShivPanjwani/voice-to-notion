@@ -1,6 +1,6 @@
 from agents.audio_recorder import record_audio
 from agents.transcription import transcribe_audio
-from agents.task_extractor import extract_tasks
+from agents.scrum_master import extract_tasks  # Using the compatibility function
 from api.notion_handler import handle_task_operations
 
 def process_meeting():

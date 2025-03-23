@@ -26,9 +26,8 @@ https://arxiv.org/pdf/2502.05439
 
 *Time estimates based on low to medium level engineering skills; your experience may vary.
 
-## Important Dates
-- Submissions before March 13th (UEA Career Fair): Guaranteed interview
-- Submissions after March 13th: Interview based on review
+## Important Note
+- Any submission of any of the three levels will guarantee you an interview after you send us the git pull request. 
 
 ## Prerequisites
 - GitHub account

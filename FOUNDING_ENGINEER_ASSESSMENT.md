@@ -15,14 +15,14 @@ https://arxiv.org/pdf/2502.05439
 - Estimated time: 2 hours*
 
 ### Level 2: Feature Enhancement
-- Enhance our Voice-to-Notion tool with button-controlled recording
+- Enhance our Voice-to-Notion tool with voice-controlled recording
 - Implement clean, documented code with proper error handling
-- Estimated time: 3 hours*
+- Estimated time: 1+ hours*
 
 ### Level 3: Advanced Integration
 - Create real-time Notion board updates during voice recording
 - Implement live streaming integration between voice input and Notion
-- Estimated time: 4+ hours*
+- Estimated time: 2+ hours*
 
 *Time estimates based on low to medium level engineering skills; your experience may vary.
 

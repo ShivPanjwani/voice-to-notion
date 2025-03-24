@@ -1,140 +1,149 @@
 # agents/task_extractor.py
 from openai import OpenAI
 import json
-import re
 import os
+import re
 from datetime import datetime
-from api.notion_handler import fetch_tasks, fetch_users, format_board_state, fetch_epics
 
-def extract_tasks(transcription):
+def extract_tasks(transcription, is_streaming=False):
     """Extract tasks and operations from transcription"""
     if not transcription:
-        print("❌ No transcription provided.")
+        print("❌ No input provided.")
         return []
     
     try:
         # Initialize OpenAI client
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         
-        current_date = datetime.now().strftime("%Y-%m-%d")
+        # Determine which task manager is being used
+        task_manager = os.getenv("TASK_MANAGER", "notion").lower()
+        platform_name = "Trello" if task_manager == "trello" else "Notion"
         
-        # Fetch current board state from Notion
-        tasks = fetch_tasks()
-        board_state = format_board_state(tasks)
-        
-        # Fetch existing epics
-        epics = fetch_epics()
-        epic_list = ", ".join([f'"{epic}"' for epic in epics]) if epics else "No epics found"
-        
+        # Create the prompt
         prompt = f"""
-        Today's date is {current_date}.
-
-        {board_state}
-
-        Available Status Options:
-        - "Not started"
-        - "In Progress"
-        - "Done"
+        Extract task operations from the following meeting transcript.
         
-        Available Epics:
-        {epic_list}
+        Today's date: {datetime.now().strftime("%Y-%m-%d")}
         
-        SPOKEN INPUT TO PROCESS:
-        "{transcription}"
-
-        You are a project management AI. Your role is to extract task operations from spoken input and/or user provided transcription from user's meeetings. 
-        1. Create new tasks
-        2. Update existing tasks
-        3. Delete tasks when requested
-        4. Rename existing tasks        
-        Pay special attention to rename operations which may use phrases like:
-        - "update task name X to Y"
-        - "rename task X to Y"
-        - "change name of task X to Y"
-        - "update the name of X to Y"
-        5. Add comments to tasks
-        6. Create or assign epics to tasks (Epics are broad-level categories that group tasks together)
-           - Only create or assign epics when explicitly requested
-           - Do not suggest epics unless asked
-
-        Return ONLY a JSON array containing task operations. Each operation should have:
-        - "operation": "create", "update", "delete", "comment", "rename", "create_epic", or "assign_epic"
-        - Appropriate fields for that operation type
-
-        For rename operations, you MUST include:
-        - "operation": "rename"
-        - "old_name": "exact existing task name"
-        - "new_name": "new task name"
-
-        For epic operations, you MUST include:
-        - "operation": "create_epic" (for new epics) or "assign_epic" (for existing epics)
-        - "task": "exact task name"
-        - "epic": "epic name"
-
-        Example rename operation:
+        You are extracting tasks for {platform_name}.
+        
+        For each task operation, provide a JSON object with the following structure:
+        
+        For creating a new task:
+        {{
+            "operation": "create",
+            "task": "task name",
+            "status": "Not started", // Optional, defaults to "Not started"
+            "deadline": "YYYY-MM-DD", // Optional
+            "assignee": "person name", // Optional
+            "epic": "epic name" // Optional
+        }}
+        
+        For updating an existing task:
+        {{
+            "operation": "update",
+            "task": "exact task name",
+            "status": "In Progress", // Optional
+            "deadline": "YYYY-MM-DD", // Optional
+            "assignee": "person name", // Optional
+            "epic": "epic name" // Optional
+        }}
+        
+        For deleting a task:
+        {{
+            "operation": "delete",
+            "task": "exact task name"
+        }}
+        
+        For renaming a task:
         {{
             "operation": "rename",
-            "old_name": "Complete Team Competency Evaluation And Gap Analysis",
-            "new_name": "Team Competency Analysis"
+            "old_name": "exact existing task name",
+            "new_name": "new task name"
         }}
-
-        Example epic operations:
+        
+        For adding a comment to a task:
+        {{
+            "operation": "comment",
+            "task": "exact task name",
+            "comment": "comment text"
+        }}
+        
+        For creating a new epic:
         {{
             "operation": "create_epic",
-            "task": "Prepare for ShopTalk",
-            "epic": "ShopTalk"
+            "epic": "epic name"
         }}
+        
+        For assigning an epic to a task:
         {{
             "operation": "assign_epic",
-            "task": "Prepare for ShopTalk",
-            "epic": "Agilow Product"
+            "task": "exact task name",
+            "epic": "epic name"
         }}
-
-        Other operation examples:
-        [
-            {{
-                "operation": "create",
-                "task": "Write documentation",
-                "status": "Not started",
-                "deadline": "2023-12-01",
-                "assignee": "John"
-            }},
-            {{
-                "operation": "update",
-                "task": "Fix login bug",
-                "status": "Done"
-            }}
-        ]
-
-        Do not include any explanations or text outside the JSON array.
-        Ensure exact task names are used when referencing existing tasks.
+        
+        Return ONLY a JSON array of these operations, with no additional text or explanation.
+        
+        Transcript:
+        {transcription}
         """
-
+        
+        # Call the OpenAI API
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o",
             messages=[
-                {"role": "system", "content": "You are a task extraction AI. Extract tasks from spoken input."},
+                {"role": "system", "content": "You are a project management AI. Extract tasks from spoken input. Return ONLY valid JSON."},
                 {"role": "user", "content": prompt}
-            ]
+            ],
+            temperature=0.1
         )
         
         result = response.choices[0].message.content.strip()
         
-        # Clean up the response - remove markdown code blocks
-        result = result.replace("```json", "").replace("```", "").strip()
+        # Clean up the response - remove markdown code blocks and any explanatory text
+        result = re.sub(r'```json|```', '', result).strip()
+        
+        # Find the first [ and last ] to extract just the JSON array
+        start_idx = result.find('[')
+        end_idx = result.rfind(']') + 1
+        
+        if start_idx >= 0 and end_idx > start_idx:
+            result = result[start_idx:end_idx]
         
         try:
             tasks = json.loads(result)
             if isinstance(tasks, list):
-                # Simplified output - no need to print number of tasks
+                # Print the extracted operations
+                if tasks:
+                    print(f"\n📋 Extracted {len(tasks)} task operations:")
+                    for i, op in enumerate(tasks, 1):
+                        op_type = op.get("operation", "unknown")
+                        if op_type == "create":
+                            print(f"  {i}. Create: {op.get('task', 'unknown')}")
+                        elif op_type == "delete":
+                            print(f"  {i}. Delete: {op.get('task', 'unknown')}")
+                        elif op_type == "update":
+                            print(f"  {i}. Update: {op.get('task', 'unknown')} - {', '.join([f'{k}: {v}' for k, v in op.items() if k not in ['operation', 'task']])}")
+                        elif op_type == "rename":
+                            print(f"  {i}. Rename: {op.get('old_name', 'unknown')} → {op.get('new_name', 'unknown')}")
+                        elif op_type == "create_epic":
+                            print(f"  {i}. Create Epic: {op.get('epic', 'unknown')}")
+                        elif op_type == "assign_epic":
+                            print(f"  {i}. Assign Epic: {op.get('task', 'unknown')} to {op.get('epic', 'unknown')}")
+                        else:
+                            print(f"  {i}. {op_type.capitalize()}: {op}")
+                else:
+                    print("\n📋 No task operations extracted.")
+                
                 return tasks
             else:
-                print("❌ Invalid response format: not a list")
+                print(f"❌ Invalid response format. Expected a list but got: {type(tasks)}")
                 return []
-        except json.JSONDecodeError:
-            print(f"❌ Failed to parse JSON response: {result}")
+        except json.JSONDecodeError as e:
+            print(f"❌ Failed to parse JSON response: {e}")
+            print(f"Raw response: {result}")
             return []
-            
+    
     except Exception as e:
         print(f"❌ Task extraction error: {str(e)}")
         return []

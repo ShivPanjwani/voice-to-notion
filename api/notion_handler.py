@@ -242,97 +242,70 @@ def create_epic_for_task(task_name, epic_name):
         print(f"❌ Failed to create epic: {response.text}")
         return False
 
-def handle_task_operations(task_operations):
-    """Process task operations in Notion"""
+def handle_task_operations(operations):
+    """Process a list of task operations"""
     results = []
     
-    for operation in task_operations:
-        op_type = operation.get('operation', '').lower()
+    # Reorder operations: create_epic first, then create tasks, then other operations
+    reordered_operations = []
+    
+    # First, add all create_epic operations
+    for op in operations:
+        if op.get("operation") == "create_epic":
+            reordered_operations.append(op)
+    
+    # Then, add all create operations
+    for op in operations:
+        if op.get("operation") == "create":
+            reordered_operations.append(op)
+    
+    # Finally, add all other operations
+    for op in operations:
+        if op.get("operation") not in ["create_epic", "create"]:
+            reordered_operations.append(op)
+    
+    for op in reordered_operations:
+        operation_type = op.get('operation')
+        result = {"operation": operation_type, "success": False}
         
         try:
-            if op_type == 'create':
-                success = create_task(operation)
-                results.append({
-                    "operation": "create",
-                    "task": operation.get('task', 'Unknown'),
-                    "success": success,
-                    "details": "Task created successfully" if success else "Failed to create task"
-                })
+            if operation_type == 'create':
+                result['success'] = create_task(op)
+                result['task'] = op.get('task')
             
-            elif op_type == 'update':
-                success = update_task(operation)
-                results.append({
-                    "operation": "update",
-                    "task": operation.get('task', 'Unknown'),
-                    "success": success,
-                    "details": "Task updated successfully" if success else "Failed to update task"
-                })
+            elif operation_type == 'update':
+                result['success'] = update_task(op)
+                result['task'] = op.get('task')
             
-            elif op_type == 'delete':
-                success = delete_task(operation)
-                results.append({
-                    "operation": "delete",
-                    "task": operation.get('task', 'Unknown'),
-                    "success": success,
-                    "details": "Task deleted successfully" if success else "Failed to delete task"
-                })
+            elif operation_type == 'delete':
+                result['success'] = delete_task(op)
+                result['task'] = op.get('task')
             
-            elif op_type == 'comment':
-                success = add_comment(operation)
-                results.append({
-                    "operation": "comment",
-                    "task": operation.get('task', 'Unknown'),
-                    "success": success,
-                    "details": "Comment added successfully" if success else "Failed to add comment"
-                })
+            elif operation_type == 'rename':
+                result['success'] = rename_task(op)
+                result['old_name'] = op.get('old_name')
+                result['new_name'] = op.get('new_name')
             
-            elif op_type == 'rename':
-                success = rename_task(operation)
-                results.append({
-                    "operation": "rename",
-                    "task": operation.get('old_name', 'Unknown'),
-                    "success": success,
-                    "details": "Task renamed successfully" if success else "Failed to rename task"
-                })
+            elif operation_type == 'comment':
+                result['success'] = add_comment(op)
+                result['task'] = op.get('task')
             
-            elif op_type == 'create_epic':
-                success = create_epic_for_task(operation.get('task'), operation.get('epic'))
-                results.append({
-                    "operation": "create_epic",
-                    "task": operation.get('task', 'Unknown'),
-                    "epic": operation.get('epic', 'Unknown'),
-                    "success": success,
-                    "details": "Epic created and assigned successfully" if success else "Failed to create epic"
-                })
+            elif operation_type == 'create_epic':
+                result['success'] = create_epic(op)
+                result['epic'] = op.get('epic')
             
-            elif op_type == 'assign_epic':
-                success = assign_epic_to_task(operation.get('task'), operation.get('epic'))
-                results.append({
-                    "operation": "assign_epic",
-                    "task": operation.get('task', 'Unknown'),
-                    "epic": operation.get('epic', 'Unknown'),
-                    "success": success,
-                    "details": "Epic assigned successfully" if success else "Failed to assign epic"
-                })
+            elif operation_type == 'assign_epic':
+                result['success'] = assign_epic_to_task(op.get('task'), op.get('epic'))
+                result['task'] = op.get('task')
+                result['epic'] = op.get('epic')
             
             else:
-                print(f"❌ Unknown operation type: {op_type}")
-                results.append({
-                    "operation": op_type,
-                    "task": operation.get('task', 'Unknown'),
-                    "success": False,
-                    "details": "Unknown operation type"
-                })
-            
+                print(f"❌ Unknown operation type: {operation_type}")
+        
         except Exception as e:
-            print(f"❌ Error processing operation {op_type}: {str(e)}")
-            results.append({
-                "operation": op_type,
-                "task": operation.get('task', operation.get('old_name', 'Unknown')),
-                "success": False,
-                "error": str(e),
-                "details": "Operation failed"
-            })
+            print(f"❌ Error processing operation {operation_type}: {str(e)}")
+        
+        results.append(result)
     
     return results
 
@@ -589,3 +562,95 @@ def find_task_by_name(task_name):
                     return page["id"]
     
     return None
+
+# Add this new function to check if an epic already exists (case-insensitive)
+def epic_exists(epic_name):
+    """Check if an epic already exists (case-insensitive)"""
+    epics = fetch_epics()
+    
+    # Make the search case-insensitive
+    search_name = epic_name.lower().strip()
+    
+    for epic in epics:
+        if epic.lower().strip() == search_name:
+            return True, epic  # Return True and the existing epic with correct capitalization
+    
+    return False, None
+
+# Update the create_epic function
+def create_epic(epic_data):
+    """Create a new epic in Notion"""
+    notion_api_key = os.getenv("NOTION_API_KEY")
+    notion_database_id = os.getenv("NOTION_DATABASE_ID")
+    
+    headers = {
+        "Authorization": f"Bearer {notion_api_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    # Get the epic name
+    epic_name = epic_data.get('epic')
+    if not epic_name:
+        print(f"❌ No epic name provided")
+        return False
+    
+    # Standardize epic name to Title Case
+    epic_name = ' '.join(word.capitalize() for word in epic_name.split())
+    
+    # Check if the epic already exists (case-insensitive)
+    exists, existing_epic = epic_exists(epic_name)
+    if exists:
+        print(f"ℹ️ Epic already exists: {existing_epic}")
+        return True
+    
+    # Get database schema to update select options
+    url = f"https://api.notion.com/v1/databases/{notion_database_id}"
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code != 200:
+        print(f"❌ Failed to get database schema: {response.text}")
+        return False
+    
+    database = response.json()
+    
+    # Find the Select property in the database schema
+    select_property_id = None
+    select_options = []
+    
+    for prop_id, prop_data in database.get("properties", {}).items():
+        if prop_data.get("type") == "select":
+            select_property_id = prop_id
+            select_options = prop_data.get("select", {}).get("options", [])
+            break
+    
+    if not select_property_id:
+        print("❌ No select property found in database schema")
+        return False
+    
+    # Add the new epic to the select options
+    select_options.append({
+        "name": epic_name,
+        "color": "blue"  # Default color
+    })
+    
+    # Update the database schema with the new select option
+    update_url = f"https://api.notion.com/v1/databases/{notion_database_id}"
+    update_data = {
+        "properties": {
+            select_property_id: {
+                "select": {
+                    "options": select_options
+                }
+            }
+        }
+    }
+    
+    update_response = requests.patch(update_url, headers=headers, json=update_data)
+    
+    if update_response.status_code >= 200 and update_response.status_code < 300:
+        print(f"✅ Created epic: {epic_name}")
+        return True
+    else:
+        print(f"❌ Failed to create epic: {update_response.text}")
+        return False

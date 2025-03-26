@@ -68,6 +68,20 @@ def extract_tasks(transcription, is_streaming=False):
         6. Create or assign epics to tasks (Epics are broad-level categories that group tasks together)
            - Only create or assign epics when explicitly requested
            - Do not suggest epics unless asked
+           - When creating a new epic, use the "create_epic" operation with ONLY the "epic" field
+           - When assigning an existing epic to a task, use the "assign_epic" operation
+           - Use Title Case for all epic names (capitalize first letter of each word)
+           - Check if an epic with a similar name already exists (ignoring case differences)
+
+        Common phrases that indicate epic creation:
+        - "Create an epic called X"
+        - "New epic named X"
+        - "Add epic X"
+        - "Under this epic..."
+        - "This epic is going to be called X"
+        - "Put these tasks under epic X"
+        - "Group these under X"
+        - "Label these as X"
 
         Return ONLY a JSON array containing task operations. Each operation should have:
         - "operation": "create", "update", "delete", "comment", "rename", "create_epic", or "assign_epic"
@@ -78,10 +92,14 @@ def extract_tasks(transcription, is_streaming=False):
         - "old_name": "exact existing task name"
         - "new_name": "new task name"
 
-        For epic operations, you MUST include:
-        - "operation": "create_epic" (for new epics) or "assign_epic" (for existing epics)
+        For creating a new epic, you MUST include:
+        - "operation": "create_epic"
+        - "epic": "Epic Name In Title Case"
+
+        For assigning an epic to a task, you MUST include:
+        - "operation": "assign_epic"
         - "task": "exact task name"
-        - "epic": "epic name"
+        - "epic": "Epic Name In Title Case"
 
         Example rename operation:
         {{
@@ -93,7 +111,6 @@ def extract_tasks(transcription, is_streaming=False):
         Example epic operations:
         {{
             "operation": "create_epic",
-            "task": "Prepare for ShopTalk",
             "epic": "ShopTalk"
         }}
         {{
@@ -125,7 +142,7 @@ def extract_tasks(transcription, is_streaming=False):
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": "You are a project management AI. Extract tasks from spoken input."},
+                {"role": "system", "content": "You are a project management AI. Extract tasks from spoken input. Return ONLY valid JSON."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1
@@ -139,6 +156,32 @@ def extract_tasks(transcription, is_streaming=False):
         try:
             tasks = json.loads(result)
             if isinstance(tasks, list):
+                # Reorder operations: create_epic first, then create tasks, then other operations
+                reordered_tasks = []
+                # First, add all create_epic operations
+                for op in tasks:
+                    if op.get("operation") == "create_epic":
+                        # Ensure epic names are in Title Case
+                        if "epic" in op:
+                            op["epic"] = ' '.join(word.capitalize() for word in op["epic"].split())
+                        reordered_tasks.append(op)
+                # Then, add all create operations
+                for op in tasks:
+                    if op.get("operation") == "create":
+                        # Ensure epic names are in Title Case if present
+                        if "epic" in op:
+                            op["epic"] = ' '.join(word.capitalize() for word in op["epic"].split())
+                        reordered_tasks.append(op)
+                # Finally, add all other operations
+                for op in tasks:
+                    if op.get("operation") not in ["create_epic", "create"]:
+                        # Ensure epic names are in Title Case if present
+                        if "epic" in op:
+                            op["epic"] = ' '.join(word.capitalize() for word in op["epic"].split())
+                        reordered_tasks.append(op)
+                
+                tasks = reordered_tasks
+                
                 # Print the extracted operations
                 if tasks:
                     print(f"\n📋 Extracted {len(tasks)} task operations:")

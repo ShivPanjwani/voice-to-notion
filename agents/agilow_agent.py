@@ -6,6 +6,7 @@ Agilow Agent - Conversational AI assistant for agile project management
 import os
 import json
 import random
+import re
 from datetime import datetime
 from openai import OpenAI
 from api.notion_handler import (
@@ -103,6 +104,11 @@ class AgilowAgent:
         
         YOUR CAPABILITIES:
         1. Manage tasks on the board (create, update, delete, change status)
+           - Every task must have a status from: "To Do", "In Progress", or "Done"
+           - Listen carefully to the user to determine the appropriate status
+           - If no status is specified by the user, default to "To Do"
+           - Always capture the EXACT task name as specified by the user
+           - For new tasks, ensure the name is descriptive and clear
         2. Create retrospective logs
         3. Generate weekly summaries
         4. Provide execution insights
@@ -116,71 +122,326 @@ class AgilowAgent:
         - You are concise but thorough
         
         IMPORTANT GUIDELINES:
+        - Intelligently determine when the user is requesting an action (even indirectly)
+        - Do NOT create tasks during simple greetings or goodbyes
         - Always be data-driven - tie insights to specific user statements
         - No hallucinations or assumptions - if you don't know, ask
         - If you can't understand the user, ask clarifying questions
         - If you can't perform an action, explain why and suggest alternatives
-        - Sense when the user is concluding the conversation and confirm before ending
-        - Vary your greetings to keep interactions fresh
+        - If you think the user wants to end the conversation, use conversational language to ask a confirmatory message
+        - Only set should_exit to true after the user explicitly confirms they want to end
+        - VARY YOUR CONVERSATIONAL RESPONSES - do not use the same phrases repeatedly
+        - The examples below are for reference only - do not strictly adhere to their exact wording
+        - Respond as a natural human would with variety and personality
+        
+        TASK EXTRACTION RULES:
+        - Pay careful attention to task names - extract the EXACT name the user specifies
+        - For task creation, look for patterns like:
+          * "create a task to [task description]"
+          * "add a task for [task description]"
+          * "I need a new task to [task description]"
+          * "we need to [task description]" (implicit)
+          * "please add [task description] to the board" (implicit)
+          * "can you create a task for [task description]"
+          * "make a task to [task description]"
+          * "add [task description] to my tasks"
+        - For task updates, look for patterns like:
+          * "update the task [task name] to [new status]"
+          * "change the status of [task name] to [new status]"
+          * "move [task name] to [new status]"
+          * "mark [task name] as [new status]"
+          * "set [task name] to [new status]"
+          * "change [task name] to [new status]"
+        - For task deletion, look for patterns like:
+          * "delete the task [task name]"
+          * "remove [task name]"
+          * "delete [task name]"
+          * "get rid of [task name]"
+        - For task renaming, look for patterns like:
+          * "rename [old task name] to [new task name]"
+          * "change the name of [old task name] to [new task name]"
+          * "update the name of [old task name] to [new task name]"
+        - For comments, look for patterns like:
+          * "add a comment to [task name]: [comment]"
+          * "comment on [task name]: [comment]"
+          * "note that [task name] needs [comment]"
+        - For grouping/labeling tasks, look for patterns like:
+          * "group these tasks under [epic name]"
+          * "label these tasks as [epic name]"
+          * "create an epic called [epic name] for these tasks"
+          * "these tasks are related to [epic name]"
+          * "add these tasks to [epic name]"
+          * "create a new group called [epic name]"
         
         RESPONSE FORMAT:
-        Your response should be in JSON format with these fields:
-        1. "message": Your conversational response to the user (markdown format)
-        2. "actions": Array of actions to perform (if any)
-        3. "should_exit": Boolean indicating if the conversation should end (default: false)
-        
-        For actions, use one of these formats:
-        
-        For task operations:
-        {{"type": "task", "operation": "create|update|delete", "data": {{...task data...}}}}
-        
-        For retro logs:
-        {{"type": "retrolog", "data": {{"team_member": "...", "went_well": "...", "didnt_go_well": "...", "action_items": "..."}}}}
-        
-        For weekly summaries:
-        {{"type": "weekly_summary", "data": {{"date_range": "...", "completed_tasks": "...", "carryover_tasks": "...", "key_metrics": "...", "weekly_retro_summary": "..."}}}}
-        
-        For execution insights:
-        {{"type": "execution_insight", "data": {{"observations": "...", "recommendations": "...", "progress_metrics": "..."}}}}
-        
-        EXAMPLE RESPONSE:
-        ```json
+        Your response should be a JSON object with the following structure:
         {{
-          "message": "I've created that task for you! 🚀 It's now in the To Do column. Anything else you'd like to add to the board?",
+          "message": "Your conversational response to the user",
+          "actions": [
+            {{
+              "type": "task",
+              "operation": "create",
+              "data": {{ 
+                "task": "Task name",  // IMPORTANT: Use "task" not "name"
+                "status": "To Do", // MUST be one of: "To Do", "In Progress", "Done"
+                "deadline": "YYYY-MM-DD", // Optional
+                "assignee": "Person name" // Optional
+              }}
+            }},
+            // More actions if needed...
+          ],
+          "should_exit": false // Set to true ONLY after user explicitly confirms they want to end
+        }}
+        
+        EXAMPLES:
+        
+        User: "Create a task to update the documentation"
+        Response:
+        {{
+          "message": "I've created a task for updating the documentation! It's set to 'To Do' status. Would you like to add a deadline or assign it to someone?",
           "actions": [
             {{
               "type": "task",
               "operation": "create",
               "data": {{
-                "name": "Implement user authentication",
-                "status": "To Do",
-                "assignee": "John",
-                "due_date": "2023-06-15"
+                "task": "Update the documentation",
+                "status": "To Do"
               }}
             }}
           ],
           "should_exit": false
         }}
-        ```
         
-        Remember to maintain a conversational tone while being precise with your actions.
+        User: "We need to implement user authentication for the app"
+        Response:
+        {{
+          "message": "Got it! I've added 'Implement user authentication for the app' to your task board with 'To Do' status. Any deadline in mind for this one?",
+          "actions": [
+            {{
+              "type": "task",
+              "operation": "create",
+              "data": {{
+                "task": "Implement user authentication for the app",
+                "status": "To Do"
+              }}
+            }}
+          ],
+          "should_exit": false
+        }}
+        
+        User: "Move the documentation task to In Progress"
+        Response:
+        {{
+          "message": "I've updated the status of 'Update the documentation' to 'In Progress'. Great to see you're working on it! 💪",
+          "actions": [
+            {{
+              "type": "task",
+              "operation": "update",
+              "data": {{
+                "task": "Update the documentation",
+                "status": "In Progress"
+              }}
+            }}
+          ],
+          "should_exit": false
+        }}
+        
+        User: "Delete the user authentication task"
+        Response:
+        {{
+          "message": "I've removed 'Implement user authentication for the app' from your task board. Is there something else you'd like to add instead?",
+          "actions": [
+            {{
+              "type": "task",
+              "operation": "delete",
+              "data": {{
+                "task": "Implement user authentication for the app"
+              }}
+            }}
+          ],
+          "should_exit": false
+        }}
+        
+        User: "Create a new epic called Authentication for all auth-related tasks"
+        Response:
+        {{
+          "message": "I've created a new epic called 'Authentication'. Would you like me to assign any existing tasks to this epic?",
+          "actions": [
+            {{
+              "type": "task",
+              "operation": "create_epic",
+              "data": {{
+                "task": "Authentication Epic",
+                "epic": "Authentication"
+              }}
+            }}
+          ],
+          "should_exit": false
+        }}
+        
+        User: "That's all for now, thanks!"
+        Response:
+        {{
+          "message": "You're welcome! Would you like to end our session for now?",
+          "actions": [],
+          "should_exit": false
+        }}
+        
+        User: "Yes, let's end the session"
+        Response:
+        {{
+          "message": "Great! I've enjoyed helping you today. Feel free to come back anytime you need assistance with your tasks or projects. Have a wonderful day! 👋",
+          "actions": [],
+          "should_exit": true
+        }}
+        
+        IMPORTANT: Vary your conversational responses naturally. Don't use the exact same phrases from these examples. Be creative and personable while maintaining professionalism.
+        
+        Always respond in JSON format as described above.
         """
         
         return system_prompt
     
+    def _verify_action(self, action):
+        """Verify that an action was successfully performed by checking the board"""
+        try:
+            if action["type"] == "task" and action["operation"] == "create":
+                # Get the task name
+                task_name = action["data"].get("task")
+                if not task_name:
+                    return False
+                
+                # Refresh context to get latest tasks
+                updated_context = self._refresh_context()
+                
+                # Check if the task exists in the updated context
+                for task in updated_context["tasks"]:
+                    if task.get("name") == task_name:
+                        return True
+                
+                return False
+            
+            # For other action types, assume success for now
+            return True
+        
+        except Exception as e:
+            print(f"❌ Error verifying action: {str(e)}")
+            return False
+    
+    def _process_actions(self, actions):
+        """Process the actions from the response"""
+        processed_actions = []
+        
+        for action in actions:
+            action_type = action.get("type")
+            
+            try:
+                # Process the action based on its type
+                if action_type == "task":
+                    operation = action.get("operation", "")
+                    data = action.get("data", {})
+                    
+                    # Create the task operation object
+                    task_operation = {
+                        "operation": operation
+                    }
+                    
+                    # Add operation-specific data
+                    if operation == "create":
+                        task_operation.update({
+                            "task": data.get("task", ""),
+                            "status": data.get("status", "To Do"),
+                            "deadline": data.get("deadline", ""),
+                            "assignee": data.get("assignee", "")
+                        })
+                    elif operation == "update":
+                        task_operation.update({
+                            "task": data.get("task", ""),
+                            "status": data.get("status", ""),
+                            "deadline": data.get("deadline", ""),
+                            "assignee": data.get("assignee", "")
+                        })
+                    elif operation == "delete":
+                        task_operation.update({
+                            "task": data.get("task", "")
+                        })
+                    elif operation == "rename":
+                        task_operation.update({
+                            "old_name": data.get("old_name", ""),
+                            "new_name": data.get("new_name", "")
+                        })
+                    elif operation == "comment":
+                        task_operation.update({
+                            "task": data.get("task", ""),
+                            "comment": data.get("comment", "")
+                        })
+                    elif operation in ["create_epic", "assign_epic"]:
+                        task_operation.update({
+                            "task": data.get("task", ""),
+                            "epic": data.get("epic", "")
+                        })
+                    
+                    # Handle the task operation
+                    handle_task_operations([task_operation])
+                    
+                    # Verify the action was successful
+                    if not self._verify_action(action):
+                        print(f"⚠️ Task operation failed, retrying: {operation} - {data}")
+                        # Retry once
+                        handle_task_operations([task_operation])
+                        
+                        # Check again
+                        if not self._verify_action(action):
+                            print(f"❌ Task operation failed after retry: {operation} - {data}")
+                    
+                    processed_actions.append(action)
+                
+                elif action_type == "retrolog":
+                    data = action.get("data", {})
+                    create_retrolog_entry(
+                        team_member=data.get("team_member", ""),
+                        went_well=data.get("went_well", ""),
+                        didnt_go_well=data.get("didnt_go_well", ""),
+                        action_items=data.get("action_items", "")
+                    )
+                    processed_actions.append(action)
+                
+                elif action_type == "weekly_summary":
+                    data = action.get("data", {})
+                    create_weekly_summary(
+                        date_range=data.get("date_range", ""),
+                        completed_tasks=data.get("completed_tasks", ""),
+                        carryover_tasks=data.get("carryover_tasks", ""),
+                        key_metrics=data.get("key_metrics", ""),
+                        weekly_retro_summary=data.get("weekly_retro_summary", "")
+                    )
+                    processed_actions.append(action)
+                
+                elif action_type == "execution_insight":
+                    data = action.get("data", {})
+                    create_execution_insight(
+                        observations=data.get("observations", ""),
+                        recommendations=data.get("recommendations", ""),
+                        progress_metrics=data.get("progress_metrics", "")
+                    )
+                    processed_actions.append(action)
+            
+            except Exception as e:
+                print(f"❌ Error processing action {action_type}: {str(e)}")
+        
+        # Refresh context after processing actions
+        self.context = self._refresh_context()
+        
+        return processed_actions
+    
     def generate_greeting(self):
-        """Generate a random greeting message"""
+        """Generate a greeting message"""
         greetings = [
-            "Hey there! Agilow at your service. What can I help you with today? 🚀",
-            "Hello! Ready to make some progress on your projects? 📊",
             "Hi! Agilow here. How can I assist with your agile workflow today? ✨",
-            "Good day! Need some Agilow in your life? I'm here to help! 🌟",
-            "Hey! Ready to crush some tasks together? Let's do this! 💪",
-            "Hello there! Your friendly project assistant is ready to roll. What's on the agenda? 📝",
-            "Hi! Agilow reporting for duty. What shall we tackle today? 🛠️",
-            "Greetings! Ready to make your projects flow smoothly? Let's get started! 🌊",
-            "Hey! Agilow here. What project challenges can I help you with today? 🧩",
-            "Hello! Your agile companion is here. What's on your mind? 🤔"
+            "Hello! I'm Agilow, your agile assistant. How can I help you today? 🚀",
+            "Hey there! Ready to boost your productivity with some agile magic? ✨",
+            "Greetings! I'm Agilow, here to help with your project management needs. What can I do for you today? 📋",
+            "Hi there! Agilow at your service. How can I help with your tasks today? 🌟"
         ]
         return random.choice(greetings)
     
@@ -227,15 +488,16 @@ class AgilowAgent:
                 
                 # Process actions if any
                 actions = response_data.get("actions", [])
+                processed_actions = []
                 if actions:
-                    self._process_actions(actions)
+                    processed_actions = self._process_actions(actions)
                 
                 # Check if we should exit
                 should_exit = response_data.get("should_exit", False)
                 
                 return {
                     "message": response_data.get("message", "I'm not sure how to respond to that."),
-                    "actions": actions,
+                    "actions": processed_actions,
                     "should_exit": should_exit
                 }
             except json.JSONDecodeError:
@@ -256,56 +518,4 @@ class AgilowAgent:
                 "message": error_msg,
                 "actions": [],
                 "should_exit": False
-            }
-    
-    def _process_actions(self, actions):
-        """Process the actions returned by the agent"""
-        for action in actions:
-            action_type = action.get("type", "")
-            
-            try:
-                if action_type == "task":
-                    operation = action.get("operation", "")
-                    data = action.get("data", {})
-                    
-                    # Convert to the format expected by handle_task_operations
-                    task_operations = [{
-                        "operation": operation,
-                        **data
-                    }]
-                    
-                    # Handle the task operation
-                    handle_task_operations(task_operations)
-                
-                elif action_type == "retrolog":
-                    data = action.get("data", {})
-                    create_retrolog_entry(
-                        team_member=data.get("team_member", ""),
-                        went_well=data.get("went_well", ""),
-                        didnt_go_well=data.get("didnt_go_well", ""),
-                        action_items=data.get("action_items", "")
-                    )
-                
-                elif action_type == "weekly_summary":
-                    data = action.get("data", {})
-                    create_weekly_summary(
-                        date_range=data.get("date_range", ""),
-                        completed_tasks=data.get("completed_tasks", ""),
-                        carryover_tasks=data.get("carryover_tasks", ""),
-                        key_metrics=data.get("key_metrics", ""),
-                        weekly_retro_summary=data.get("weekly_retro_summary", "")
-                    )
-                
-                elif action_type == "execution_insight":
-                    data = action.get("data", {})
-                    create_execution_insight(
-                        observations=data.get("observations", ""),
-                        recommendations=data.get("recommendations", ""),
-                        progress_metrics=data.get("progress_metrics", "")
-                    )
-            
-            except Exception as e:
-                print(f"❌ Error processing action {action_type}: {str(e)}")
-        
-        # Refresh context after processing actions
-        self.context = self._refresh_context() 
+            } 

@@ -589,3 +589,404 @@ def find_task_by_name(task_name):
                     return page["id"]
     
     return None
+
+def create_retrolog_entry(team_member, went_well, didnt_go_well, action_items):
+    """Create a new entry in the Retrologs Database"""
+    notion_api_key = os.getenv("NOTION_API_KEY")
+    notion_retrolog_database_id = os.getenv("NOTION_RETROLOG_DATABASE_ID")
+    
+    if not notion_retrolog_database_id:
+        print("❌ Retrolog database ID not configured.")
+        return {"success": False, "message": "Retrolog database ID not configured"}
+    
+    # Format database ID correctly (remove quotes if present)
+    notion_retrolog_database_id = notion_retrolog_database_id.strip('"\'')
+    
+    headers = {
+        "Authorization": f"Bearer {notion_api_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    url = "https://api.notion.com/v1/pages"
+    
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    
+    # Format the rich text for each field
+    def format_rich_text(content):
+        if not content:
+            return []
+        return [{"type": "text", "text": {"content": content}}]
+    
+    # Prepare the payload
+    payload = {
+        "parent": {"database_id": notion_retrolog_database_id},
+        "properties": {
+            "Name": {
+                "title": [
+                    {
+                        "text": {
+                            "content": f"Retro Entry - {current_date}"
+                        }
+                    }
+                ]
+            },
+            "Date": {
+                "date": {
+                    "start": current_date
+                }
+            },
+            "Team Member": {
+                "rich_text": format_rich_text(team_member)
+            },
+            "What Went Well": {
+                "rich_text": format_rich_text(went_well)
+            },
+            "What Didn't Go Well": {
+                "rich_text": format_rich_text(didnt_go_well)
+            },
+            "Action Items": {
+                "rich_text": format_rich_text(action_items)
+            }
+        }
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        
+        if response.status_code >= 200 and response.status_code < 300:
+            print(f"✅ Successfully created retrolog entry")
+            return {"success": True, "message": "Retrolog entry created successfully"}
+        else:
+            print(f"❌ Failed to create retrolog entry: {response.text}")
+            return {"success": False, "message": f"Failed to create retrolog entry: {response.text}"}
+    except Exception as e:
+        print(f"❌ Exception creating retrolog entry: {str(e)}")
+        return {"success": False, "message": f"Exception creating retrolog entry: {str(e)}"}
+
+def fetch_retrolog_entries(limit=10):
+    """Fetch recent entries from the Retrologs Database"""
+    notion_api_key = os.getenv("NOTION_API_KEY")
+    notion_retrolog_database_id = os.getenv("NOTION_RETROLOG_DATABASE_ID")
+    
+    if not notion_retrolog_database_id:
+        print("❌ Retrolog database ID not configured.")
+        return []
+    
+    headers = {
+        "Authorization": f"Bearer {notion_api_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    url = f"https://api.notion.com/v1/databases/{notion_retrolog_database_id}/query"
+    
+    payload = {
+        "sorts": [
+            {
+                "property": "Date",
+                "direction": "descending"
+            }
+        ],
+        "page_size": limit
+    }
+    
+    response = requests.post(url, headers=headers, json=payload)
+    
+    if response.status_code >= 200 and response.status_code < 300:
+        results = response.json().get("results", [])
+        entries = []
+        
+        for page in results:
+            properties = page.get("properties", {})
+            
+            # Extract text content from rich_text properties
+            def extract_text(rich_text_property):
+                rich_text = properties.get(rich_text_property, {}).get("rich_text", [])
+                if rich_text:
+                    return rich_text[0].get("text", {}).get("content", "")
+                return ""
+            
+            # Extract date
+            date_property = properties.get("Date", {}).get("date", {})
+            date = date_property.get("start", "") if date_property else ""
+            
+            entry = {
+                "id": page.get("id", ""),
+                "date": date,
+                "team_member": extract_text("Team Member"),
+                "went_well": extract_text("What Went Well"),
+                "didnt_go_well": extract_text("What Didn't Go Well"),
+                "action_items": extract_text("Action Items")
+            }
+            
+            entries.append(entry)
+        
+        return entries
+    else:
+        print(f"❌ Failed to fetch retrolog entries: {response.text}")
+        return []
+
+def create_weekly_summary(date_range, completed_tasks, carryover_tasks, key_metrics, weekly_retro_summary):
+    """Create a new entry in the Weekly History Database"""
+    notion_api_key = os.getenv("NOTION_API_KEY")
+    notion_weekly_history_database_id = os.getenv("NOTION_WEEKLY_HISTORY_DATABASE_ID")
+    
+    if not notion_weekly_history_database_id:
+        print("❌ Weekly History database ID not configured.")
+        return {"success": False, "message": "Weekly History database ID not configured"}
+    
+    headers = {
+        "Authorization": f"Bearer {notion_api_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    url = "https://api.notion.com/v1/pages"
+    
+    # Format the rich text for each field
+    def format_rich_text(content):
+        if not content:
+            return []
+        return [{"type": "text", "text": {"content": content}}]
+    
+    payload = {
+        "parent": {"database_id": notion_weekly_history_database_id},
+        "properties": {
+            "Name": {
+                "title": [
+                    {
+                        "text": {
+                            "content": f"Weekly Summary - {date_range}"
+                        }
+                    }
+                ]
+            },
+            "Date Range": {
+                "date": {
+                    "start": date_range
+                }
+            },
+            "Completed Tasks": {
+                "rich_text": format_rich_text(completed_tasks)
+            },
+            "Carryover Tasks": {
+                "rich_text": format_rich_text(carryover_tasks)
+            },
+            "Key Metrics": {
+                "rich_text": format_rich_text(key_metrics)
+            },
+            "Weekly Retro Summary": {
+                "rich_text": format_rich_text(weekly_retro_summary)
+            }
+        }
+    }
+    
+    response = requests.post(url, headers=headers, json=payload)
+    
+    if response.status_code >= 200 and response.status_code < 300:
+        print(f"✅ Successfully created weekly summary")
+        return {"success": True, "message": "Weekly summary created successfully"}
+    else:
+        print(f"❌ Failed to create weekly summary: {response.text}")
+        return {"success": False, "message": f"Failed to create weekly summary: {response.text}"}
+
+def fetch_weekly_summaries(limit=5):
+    """Fetch recent entries from the Weekly History Database"""
+    notion_api_key = os.getenv("NOTION_API_KEY")
+    notion_weekly_history_database_id = os.getenv("NOTION_WEEKLY_HISTORY_DATABASE_ID")
+    
+    if not notion_weekly_history_database_id:
+        print("❌ Weekly History database ID not configured.")
+        return []
+    
+    headers = {
+        "Authorization": f"Bearer {notion_api_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    url = f"https://api.notion.com/v1/databases/{notion_weekly_history_database_id}/query"
+    
+    payload = {
+        "sorts": [
+            {
+                "property": "Date Range",
+                "direction": "descending"
+            }
+        ],
+        "page_size": limit
+    }
+    
+    response = requests.post(url, headers=headers, json=payload)
+    
+    if response.status_code >= 200 and response.status_code < 300:
+        results = response.json().get("results", [])
+        summaries = []
+        
+        for page in results:
+            properties = page.get("properties", {})
+            
+            # Extract text content from rich_text properties
+            def extract_text(rich_text_property):
+                rich_text = properties.get(rich_text_property, {}).get("rich_text", [])
+                if rich_text:
+                    return rich_text[0].get("text", {}).get("content", "")
+                return ""
+            
+            # Extract date
+            date_property = properties.get("Date Range", {}).get("date", {})
+            date_range = date_property.get("start", "") if date_property else ""
+            
+            summary = {
+                "id": page.get("id", ""),
+                "date_range": date_range,
+                "completed_tasks": extract_text("Completed Tasks"),
+                "carryover_tasks": extract_text("Carryover Tasks"),
+                "key_metrics": extract_text("Key Metrics"),
+                "weekly_retro_summary": extract_text("Weekly Retro Summary")
+            }
+            
+            summaries.append(summary)
+        
+        return summaries
+    else:
+        print(f"❌ Failed to fetch weekly summaries: {response.text}")
+        return []
+
+def create_execution_insight(observations, recommendations, progress_metrics):
+    """Create a new entry in the Execution Insights Database"""
+    notion_api_key = os.getenv("NOTION_API_KEY")
+    notion_execution_insights_database_id = os.getenv("NOTION_EXECUTION_INSIGHTS_DATABASE_ID")
+    
+    if not notion_execution_insights_database_id:
+        print("❌ Execution Insights database ID not configured.")
+        return {"success": False, "message": "Execution Insights database ID not configured"}
+    
+    headers = {
+        "Authorization": f"Bearer {notion_api_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    url = "https://api.notion.com/v1/pages"
+    
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    
+    # Format the rich text for each field
+    def format_rich_text(content):
+        if not content:
+            return []
+        return [{"type": "text", "text": {"content": content}}]
+    
+    payload = {
+        "parent": {"database_id": notion_execution_insights_database_id},
+        "properties": {
+            "Name": {
+                "title": [
+                    {
+                        "text": {
+                            "content": f"Execution Insight - {current_date}"
+                        }
+                    }
+                ]
+            },
+            "Date": {
+                "date": {
+                    "start": current_date
+                }
+            },
+            "Observations": {
+                "rich_text": format_rich_text(observations)
+            },
+            "Recommendations": {
+                "rich_text": format_rich_text(recommendations)
+            },
+            "Progress Metrics": {
+                "rich_text": format_rich_text(progress_metrics)
+            }
+        }
+    }
+    
+    response = requests.post(url, headers=headers, json=payload)
+    
+    if response.status_code >= 200 and response.status_code < 300:
+        print(f"✅ Successfully created execution insight")
+        return {"success": True, "message": "Execution insight created successfully"}
+    else:
+        print(f"❌ Failed to create execution insight: {response.text}")
+        return {"success": False, "message": f"Failed to create execution insight: {response.text}"}
+
+def fetch_execution_insights(limit=5):
+    """Fetch recent entries from the Execution Insights Database"""
+    notion_api_key = os.getenv("NOTION_API_KEY")
+    notion_execution_insights_database_id = os.getenv("NOTION_EXECUTION_INSIGHTS_DATABASE_ID")
+    
+    if not notion_execution_insights_database_id:
+        print("❌ Execution Insights database ID not configured.")
+        return []
+    
+    headers = {
+        "Authorization": f"Bearer {notion_api_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    url = f"https://api.notion.com/v1/databases/{notion_execution_insights_database_id}/query"
+    
+    payload = {
+        "sorts": [
+            {
+                "property": "Date",
+                "direction": "descending"
+            }
+        ],
+        "page_size": limit
+    }
+    
+    response = requests.post(url, headers=headers, json=payload)
+    
+    if response.status_code >= 200 and response.status_code < 300:
+        results = response.json().get("results", [])
+        insights = []
+        
+        for page in results:
+            properties = page.get("properties", {})
+            
+            # Extract text content from rich_text properties
+            def extract_text(rich_text_property):
+                rich_text = properties.get(rich_text_property, {}).get("rich_text", [])
+                if rich_text:
+                    return rich_text[0].get("text", {}).get("content", "")
+                return ""
+            
+            # Extract date
+            date_property = properties.get("Date", {}).get("date", {})
+            date = date_property.get("start", "") if date_property else ""
+            
+            insight = {
+                "id": page.get("id", ""),
+                "date": date,
+                "observations": extract_text("Observations"),
+                "recommendations": extract_text("Recommendations"),
+                "progress_metrics": extract_text("Progress Metrics")
+            }
+            
+            insights.append(insight)
+        
+        return insights
+    else:
+        print(f"❌ Failed to fetch execution insights: {response.text}")
+        return []
+
+# Utility function to get a comprehensive context for the agent
+def fetch_context_for_agent():
+    """Fetch comprehensive context from all databases for the agent"""
+    context = {
+        "tasks": fetch_tasks(),
+        "retrologs": fetch_retrolog_entries(5),  # Last 5 retro entries
+        "weekly_summaries": fetch_weekly_summaries(2),  # Last 2 weekly summaries
+        "execution_insights": fetch_execution_insights(2)  # Last 2 execution insights
+    }
+    
+    return context

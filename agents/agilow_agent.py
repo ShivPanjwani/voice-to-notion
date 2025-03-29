@@ -6,7 +6,6 @@ Agilow Agent - Conversational AI assistant for agile project management
 import os
 import json
 import random
-import re
 from datetime import datetime
 from openai import OpenAI
 from api.notion_handler import (
@@ -14,7 +13,10 @@ from api.notion_handler import (
     handle_task_operations,
     create_retrolog_entry,
     create_weekly_summary,
-    create_execution_insight
+    create_execution_insight,
+    fetch_tasks,
+    fetch_users,
+    fetch_epics
 )
 
 class AgilowAgent:
@@ -27,59 +29,71 @@ class AgilowAgent:
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.conversation_history = []
         self.max_history = max_history
-        self.context = self._refresh_context()
-    
-    def _refresh_context(self):
-        """Refresh the context from Notion databases"""
-        try:
-            return fetch_context_for_agent()
-        except Exception as e:
-            print(f"❌ Error refreshing context: {str(e)}")
-            return {
-                "tasks": [],
-                "retrologs": [],
-                "weekly_summaries": [],
-                "execution_insights": []
-            }
     
     def _build_system_prompt(self):
         """Build the system prompt with current context"""
         current_date = datetime.now().strftime("%Y-%m-%d")
         
+        # Get the latest tasks, users, and epics
+        tasks = fetch_tasks()
+        users = fetch_users()
+        epics = fetch_epics()
+        
         # Format tasks for display
-        tasks_by_status = {}
-        for task in self.context["tasks"]:
+        tasks_formatted = ""
+        for task in tasks:
+            task_name = task.get("name", "Unnamed Task")
             status = task.get("status", "No Status")
-            if status not in tasks_by_status:
-                tasks_by_status[status] = []
-            tasks_by_status[status].append(task.get("name", "Unnamed Task"))
+            deadline = task.get("deadline", "No Deadline")
+            assignee = task.get("assignee", "Unassigned")
+            epic = task.get("epic", "No Epic")
+            
+            tasks_formatted += f"- {task_name} | Status: {status} | Deadline: {deadline} | Assignee: {assignee} | Epic: {epic}\n"
         
-        tasks_formatted = "\n".join([
-            f"- {status}: {', '.join(tasks)}" 
-            for status, tasks in tasks_by_status.items()
-        ])
+        if not tasks_formatted:
+            tasks_formatted = "No tasks found"
         
-        # Format recent retrologs
-        retrologs_formatted = "\n".join([
-            f"- {entry.get('date', 'No Date')}: {entry.get('team_member', 'Unknown')} - " +
-            f"Went well: {entry.get('went_well', 'N/A')[:50]}..." +
-            f"Didn't go well: {entry.get('didnt_go_well', 'N/A')[:50]}..."
-            for entry in self.context["retrologs"][:3]  # Show only the 3 most recent
-        ])
+        # Format users and epics
+        users_formatted = ", ".join(users) if users else "No users found"
+        epics_formatted = ", ".join(epics) if epics else "No epics found"
+        
+        # Get additional context
+        context = fetch_context_for_agent()
+        
+        # Format retrologs
+        retrologs_formatted = ""
+        for log in context.get("retrologs", [])[:3]:  # Show only the 3 most recent
+            date = log.get("date", "No Date")
+            team_member = log.get("team_member", "Unknown")
+            went_well = log.get("went_well", "N/A")
+            didnt_go_well = log.get("didnt_go_well", "N/A")
+            
+            retrologs_formatted += f"- {date}: {team_member} - Went well: {went_well[:50]}... | Didn't go well: {didnt_go_well[:50]}...\n"
+        
+        if not retrologs_formatted:
+            retrologs_formatted = "No retro logs found"
         
         # Format weekly summaries
-        summaries_formatted = "\n".join([
-            f"- {summary.get('date_range', 'No Date')}: " +
-            f"Completed: {summary.get('completed_tasks', 'N/A')[:50]}..."
-            for summary in self.context["weekly_summaries"][:2]  # Show only the 2 most recent
-        ])
+        summaries_formatted = ""
+        for summary in context.get("weekly_summaries", [])[:2]:  # Show only the 2 most recent
+            date_range = summary.get("date_range", "No Date")
+            completed = summary.get("completed_tasks", "N/A")
+            
+            summaries_formatted += f"- {date_range}: Completed: {completed[:50]}...\n"
+        
+        if not summaries_formatted:
+            summaries_formatted = "No weekly summaries found"
         
         # Format execution insights
-        insights_formatted = "\n".join([
-            f"- {insight.get('date', 'No Date')}: " +
-            f"Observations: {insight.get('observations', 'N/A')[:50]}..."
-            for insight in self.context["execution_insights"][:2]  # Show only the 2 most recent
-        ])
+        insights_formatted = ""
+        for insight in context.get("execution_insights", [])[:2]:  # Show only the 2 most recent
+            date = insight.get("date", "No Date")
+            observations = insight.get("observations", "N/A")
+            
+            insights_formatted += f"- {date}: Observations: {observations[:50]}...\n"
+        
+        if not insights_formatted:
+            insights_formatted = "No execution insights found"
         
         # Build the system prompt
         system_prompt = f"""
@@ -91,27 +105,38 @@ class AgilowAgent:
         CURRENT CONTEXT:
         
         Tasks:
-        {tasks_formatted if tasks_formatted else "No tasks found"}
+        {tasks_formatted}
+        
+        Available Users:
+        {users_formatted}
+        
+        Available Epics:
+        {epics_formatted}
         
         Recent Retro Logs:
-        {retrologs_formatted if retrologs_formatted else "No retro logs found"}
+        {retrologs_formatted}
         
         Recent Weekly Summaries:
-        {summaries_formatted if summaries_formatted else "No weekly summaries found"}
+        {summaries_formatted}
         
         Recent Execution Insights:
-        {insights_formatted if insights_formatted else "No execution insights found"}
+        {insights_formatted}
         
         YOUR CAPABILITIES:
-        1. Manage tasks on the board (create, update, delete, change status)
-           - Every task must have a status from: "To Do", "In Progress", or "Done"
-           - Listen carefully to the user to determine the appropriate status
-           - If no status is specified by the user, default to "To Do"
-           - Always capture the EXACT task name as specified by the user
-           - For new tasks, ensure the name is descriptive and clear
+        1. Manipulate the Notion board based on user input:
+           - Create new tasks
+           - Update existing tasks (status, deadline, assignee)
+           - Delete tasks
+           - Rename tasks
+           - Add comments to tasks
+           - Create new epics and assign tasks to epics
+        
         2. Create retrospective logs
+        
         3. Generate weekly summaries
+        
         4. Provide execution insights
+        
         5. Answer questions about agile methodologies and project management
         
         YOUR PERSONALITY:
@@ -129,68 +154,80 @@ class AgilowAgent:
         - If you can't understand the user, ask clarifying questions
         - If you can't perform an action, explain why and suggest alternatives
         - If you think the user wants to end the conversation, use conversational language to ask a confirmatory message
-        - Only set should_exit to true after the user explicitly confirms they want to end
+        - Only set should_exit to true after user explicitly confirms they want to end
         - VARY YOUR CONVERSATIONAL RESPONSES - do not use the same phrases repeatedly
         - The examples below are for reference only - do not strictly adhere to their exact wording
         - Respond as a natural human would with variety and personality
         
-        TASK EXTRACTION RULES:
-        - Pay careful attention to task names - extract the EXACT name the user specifies
-        - For task creation, look for patterns like:
-          * "create a task to [task description]"
-          * "add a task for [task description]"
-          * "I need a new task to [task description]"
-          * "we need to [task description]" (implicit)
-          * "please add [task description] to the board" (implicit)
-          * "can you create a task for [task description]"
-          * "make a task to [task description]"
-          * "add [task description] to my tasks"
-        - For task updates, look for patterns like:
-          * "update the task [task name] to [new status]"
-          * "change the status of [task name] to [new status]"
-          * "move [task name] to [new status]"
-          * "mark [task name] as [new status]"
-          * "set [task name] to [new status]"
-          * "change [task name] to [new status]"
-        - For task deletion, look for patterns like:
-          * "delete the task [task name]"
-          * "remove [task name]"
-          * "delete [task name]"
-          * "get rid of [task name]"
-        - For task renaming, look for patterns like:
-          * "rename [old task name] to [new task name]"
-          * "change the name of [old task name] to [new task name]"
-          * "update the name of [old task name] to [new task name]"
-        - For comments, look for patterns like:
-          * "add a comment to [task name]: [comment]"
-          * "comment on [task name]: [comment]"
-          * "note that [task name] needs [comment]"
-        - For grouping/labeling tasks, look for patterns like:
-          * "group these tasks under [epic name]"
-          * "label these tasks as [epic name]"
-          * "create an epic called [epic name] for these tasks"
-          * "these tasks are related to [epic name]"
-          * "add these tasks to [epic name]"
-          * "create a new group called [epic name]"
+        VALIDATION RULES:
+        - Status must be one of: "To Do", "In Progress", "Done"
+        - Dates must be in YYYY-MM-DD format
+        - Only assign to users that exist in the system
+        - When updating tasks, always include the exact task name as it appears on the board
+        - For epics: You can create new epics OR use existing ones from the available epics list
+        
+        TASK OPERATION EXAMPLES:
+        
+        1. Create a task:
+        {{
+          "operation": "create",
+          "task": "Write documentation",
+          "status": "To Do",
+          "deadline": "2023-04-15",  // Optional
+          "assignee": "John"  // Optional
+        }}
+        
+        2. Update a task:
+        {{
+          "operation": "update",
+          "task": "Write documentation",
+          "status": "In Progress",  // Optional
+          "deadline": "2023-04-20",  // Optional
+          "assignee": "Sarah"  // Optional
+        }}
+        
+        3. Delete a task:
+        {{
+          "operation": "delete",
+          "task": "Write documentation"
+        }}
+        
+        4. Rename a task:
+        {{
+          "operation": "rename",
+          "task": "Write documentation",
+          "new_name": "Update documentation"
+        }}
+        
+        5. Add a comment to a task:
+        {{
+          "operation": "comment",
+          "task": "Write documentation",
+          "comment": "This is a high priority task"
+        }}
+        
+        6. Create a new epic:
+        {{
+          "operation": "create_epic",
+          "task": "Documentation Epic",
+          "epic": "Documentation"
+        }}
+        
+        7. Assign a task to an epic:
+        {{
+          "operation": "assign_epic",
+          "task": "Write documentation",
+          "epic": "Documentation"
+        }}
         
         RESPONSE FORMAT:
-        Your response should be a JSON object with the following structure:
         {{
           "message": "Your conversational response to the user",
           "actions": [
-            {{
-              "type": "task",
-              "operation": "create",
-              "data": {{ 
-                "task": "Task name",  // IMPORTANT: Use "task" not "name"
-                "status": "To Do", // MUST be one of: "To Do", "In Progress", "Done"
-                "deadline": "YYYY-MM-DD", // Optional
-                "assignee": "Person name" // Optional
-              }}
-            }},
-            // More actions if needed...
+            // Array of task operations (can be empty)
+            // Each operation should follow one of the formats above
           ],
-          "should_exit": false // Set to true ONLY after user explicitly confirms they want to end
+          "should_exit": false  // Set to true only when the user explicitly wants to end the conversation
         }}
         
         EXAMPLES:
@@ -201,29 +238,9 @@ class AgilowAgent:
           "message": "I've created a task for updating the documentation! It's set to 'To Do' status. Would you like to add a deadline or assign it to someone?",
           "actions": [
             {{
-              "type": "task",
               "operation": "create",
-              "data": {{
-                "task": "Update the documentation",
-                "status": "To Do"
-              }}
-            }}
-          ],
-          "should_exit": false
-        }}
-        
-        User: "We need to implement user authentication for the app"
-        Response:
-        {{
-          "message": "Got it! I've added 'Implement user authentication for the app' to your task board with 'To Do' status. Any deadline in mind for this one?",
-          "actions": [
-            {{
-              "type": "task",
-              "operation": "create",
-              "data": {{
-                "task": "Implement user authentication for the app",
-                "status": "To Do"
-              }}
+              "task": "Update the documentation",
+              "status": "To Do"
             }}
           ],
           "should_exit": false
@@ -235,45 +252,9 @@ class AgilowAgent:
           "message": "I've updated the status of 'Update the documentation' to 'In Progress'. Great to see you're working on it! 💪",
           "actions": [
             {{
-              "type": "task",
               "operation": "update",
-              "data": {{
-                "task": "Update the documentation",
-                "status": "In Progress"
-              }}
-            }}
-          ],
-          "should_exit": false
-        }}
-        
-        User: "Delete the user authentication task"
-        Response:
-        {{
-          "message": "I've removed 'Implement user authentication for the app' from your task board. Is there something else you'd like to add instead?",
-          "actions": [
-            {{
-              "type": "task",
-              "operation": "delete",
-              "data": {{
-                "task": "Implement user authentication for the app"
-              }}
-            }}
-          ],
-          "should_exit": false
-        }}
-        
-        User: "Create a new epic called Authentication for all auth-related tasks"
-        Response:
-        {{
-          "message": "I've created a new epic called 'Authentication'. Would you like me to assign any existing tasks to this epic?",
-          "actions": [
-            {{
-              "type": "task",
-              "operation": "create_epic",
-              "data": {{
-                "task": "Authentication Epic",
-                "epic": "Authentication"
-              }}
+              "task": "Update the documentation",
+              "status": "In Progress"
             }}
           ],
           "should_exit": false
@@ -301,138 +282,6 @@ class AgilowAgent:
         """
         
         return system_prompt
-    
-    def _verify_action(self, action):
-        """Verify that an action was successfully performed by checking the board"""
-        try:
-            if action["type"] == "task" and action["operation"] == "create":
-                # Get the task name
-                task_name = action["data"].get("task")
-                if not task_name:
-                    return False
-                
-                # Refresh context to get latest tasks
-                updated_context = self._refresh_context()
-                
-                # Check if the task exists in the updated context
-                for task in updated_context["tasks"]:
-                    if task.get("name") == task_name:
-                        return True
-                
-                return False
-            
-            # For other action types, assume success for now
-            return True
-        
-        except Exception as e:
-            print(f"❌ Error verifying action: {str(e)}")
-            return False
-    
-    def _process_actions(self, actions):
-        """Process the actions from the response"""
-        processed_actions = []
-        
-        for action in actions:
-            action_type = action.get("type")
-            
-            try:
-                # Process the action based on its type
-                if action_type == "task":
-                    operation = action.get("operation", "")
-                    data = action.get("data", {})
-                    
-                    # Create the task operation object
-                    task_operation = {
-                        "operation": operation
-                    }
-                    
-                    # Add operation-specific data
-                    if operation == "create":
-                        task_operation.update({
-                            "task": data.get("task", ""),
-                            "status": data.get("status", "To Do"),
-                            "deadline": data.get("deadline", ""),
-                            "assignee": data.get("assignee", "")
-                        })
-                    elif operation == "update":
-                        task_operation.update({
-                            "task": data.get("task", ""),
-                            "status": data.get("status", ""),
-                            "deadline": data.get("deadline", ""),
-                            "assignee": data.get("assignee", "")
-                        })
-                    elif operation == "delete":
-                        task_operation.update({
-                            "task": data.get("task", "")
-                        })
-                    elif operation == "rename":
-                        task_operation.update({
-                            "old_name": data.get("old_name", ""),
-                            "new_name": data.get("new_name", "")
-                        })
-                    elif operation == "comment":
-                        task_operation.update({
-                            "task": data.get("task", ""),
-                            "comment": data.get("comment", "")
-                        })
-                    elif operation in ["create_epic", "assign_epic"]:
-                        task_operation.update({
-                            "task": data.get("task", ""),
-                            "epic": data.get("epic", "")
-                        })
-                    
-                    # Handle the task operation
-                    handle_task_operations([task_operation])
-                    
-                    # Verify the action was successful
-                    if not self._verify_action(action):
-                        print(f"⚠️ Task operation failed, retrying: {operation} - {data}")
-                        # Retry once
-                        handle_task_operations([task_operation])
-                        
-                        # Check again
-                        if not self._verify_action(action):
-                            print(f"❌ Task operation failed after retry: {operation} - {data}")
-                    
-                    processed_actions.append(action)
-                
-                elif action_type == "retrolog":
-                    data = action.get("data", {})
-                    create_retrolog_entry(
-                        team_member=data.get("team_member", ""),
-                        went_well=data.get("went_well", ""),
-                        didnt_go_well=data.get("didnt_go_well", ""),
-                        action_items=data.get("action_items", "")
-                    )
-                    processed_actions.append(action)
-                
-                elif action_type == "weekly_summary":
-                    data = action.get("data", {})
-                    create_weekly_summary(
-                        date_range=data.get("date_range", ""),
-                        completed_tasks=data.get("completed_tasks", ""),
-                        carryover_tasks=data.get("carryover_tasks", ""),
-                        key_metrics=data.get("key_metrics", ""),
-                        weekly_retro_summary=data.get("weekly_retro_summary", "")
-                    )
-                    processed_actions.append(action)
-                
-                elif action_type == "execution_insight":
-                    data = action.get("data", {})
-                    create_execution_insight(
-                        observations=data.get("observations", ""),
-                        recommendations=data.get("recommendations", ""),
-                        progress_metrics=data.get("progress_metrics", "")
-                    )
-                    processed_actions.append(action)
-            
-            except Exception as e:
-                print(f"❌ Error processing action {action_type}: {str(e)}")
-        
-        # Refresh context after processing actions
-        self.context = self._refresh_context()
-        
-        return processed_actions
     
     def generate_greeting(self):
         """Generate a greeting message"""
@@ -488,16 +337,16 @@ class AgilowAgent:
                 
                 # Process actions if any
                 actions = response_data.get("actions", [])
-                processed_actions = []
                 if actions:
-                    processed_actions = self._process_actions(actions)
+                    print(f"📋 Processing {len(actions)} actions")
+                    handle_task_operations(actions)
                 
                 # Check if we should exit
                 should_exit = response_data.get("should_exit", False)
                 
                 return {
                     "message": response_data.get("message", "I'm not sure how to respond to that."),
-                    "actions": processed_actions,
+                    "actions": actions,
                     "should_exit": should_exit
                 }
             except json.JSONDecodeError:

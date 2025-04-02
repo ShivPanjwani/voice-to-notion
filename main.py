@@ -2,6 +2,7 @@
 """
 Voice-to-Notion Task Manager
 ----------------------------
+3
 A tool that extracts tasks from meeting transcripts or live meetings and adds them to Notion.
 """
 
@@ -13,6 +14,8 @@ from agents.audio_recorder import record_audio
 from agents.transcription import transcribe_audio
 from agents.task_extractor import extract_tasks
 from api.notion_handler import handle_task_operations
+from agents.streaming_processor import StreamingMeetingProcessor
+from agents.meeting_processor import process_meeting
 
 def main():
     """Main application entry point"""
@@ -34,48 +37,58 @@ def main():
     
     # Ask user if they want to process a transcript or record a meeting
     while True:
-        choice = input("\nDo you want to [1] process a transcript or [2] record a meeting? (1/2): ")
+        print("\nChoose an option:")
+        print("1. Process a transcript")
+        print("2. Record a meeting (batch processing)")
+        print("3. Live streaming meeting (real-time updates)")
+        
+        choice = input("\nEnter your choice (1/2/3): ")
+        
         if choice == "1":
             process_transcript()
             break
         elif choice == "2":
             record_meeting()
             break
+        elif choice == "3":
+            stream_meeting()
+            break
         else:
-            print("Invalid choice. Please enter 1 or 2.")
+            print("Invalid choice. Please enter 1, 2, or 3.")
+
+def stream_meeting():
+    """Stream a meeting with real-time Notion updates"""
+    print("\n" + "=" * 50)
+    print("Live Streaming Meeting")
+    print("=" * 50)
+    
+    print("\nStarting live streaming with real-time Notion updates.")
+    print("Audio will be processed in chunks and tasks will be updated as they are detected.")
+    
+    # Create and start the streaming processor
+    processor = StreamingMeetingProcessor(chunk_duration=10)  # 10-second chunks
+    processor.start()
 
 def format_operation_summary(results):
-    """Format operation results into a clean summary"""
+    """Format the operation results into a readable summary"""
     if not results:
-        return "No operations performed."
+        return "\nNo operations were processed."
     
-    success_count = sum(1 for result in results if result.get("success", False))
+    summary = "\n" + "=" * 50
+    summary += "\nOperation Summary"
+    summary += "\n" + "=" * 50
     
-    summary = f"\n✅ Successfully performed {success_count} of {len(results)} operations:\n"
-    
-    for result in results:
-        task_name = result.get("task", "Unknown task")
-        operation = result.get("operation", "unknown")
+    for i, result in enumerate(results, 1):
+        operation = result.get("operation", "Unknown")
         success = result.get("success", False)
+        task = result.get("task", "Unknown task")
         
-        # Format the operation description
-        if operation == "create":
-            description = "New task created"
-        elif operation == "update":
-            description = "Task updated"
-        elif operation == "delete":
-            description = "Task deleted"
-        elif operation == "comment":
-            description = "Comment added"
-        elif operation == "rename":
-            description = "Task renamed"
-        else:
-            description = f"Unknown operation: {operation}"
-        
-        # Add status indicator
         status = "✅" if success else "❌"
         
-        summary += f"{status} {task_name} - {description}\n"
+        summary += f"\n{i}. {status} {operation.capitalize()}: {task}"
+        
+        if not success and "error" in result:
+            summary += f"\n   Error: {result['error']}"
     
     return summary
 

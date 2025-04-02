@@ -2,7 +2,6 @@
 """
 Voice-to-Notion Task Manager
 ----------------------------
-3
 A tool that extracts tasks from meeting transcripts or live meetings and adds them to Notion.
 """
 
@@ -13,7 +12,10 @@ from utils.setup_wizard import run_setup_wizard
 from agents.audio_recorder import record_audio
 from agents.transcription import transcribe_audio
 from agents.task_extractor import extract_tasks
-from api.notion_handler import handle_task_operations
+#from api.notion_handler import handle_task_operations, format_operation_summary
+# Import Trello handlers
+from agents.task_extractor_trello import extract_tasks_trello
+from api.trello_handler import handle_task_operations_trello, format_operation_summary_trello
 from agents.streaming_processor import StreamingMeetingProcessor
 from agents.meeting_processor import process_meeting
 
@@ -69,29 +71,6 @@ def stream_meeting():
     processor = StreamingMeetingProcessor(chunk_duration=10)  # 10-second chunks
     processor.start()
 
-def format_operation_summary(results):
-    """Format the operation results into a readable summary"""
-    if not results:
-        return "\nNo operations were processed."
-    
-    summary = "\n" + "=" * 50
-    summary += "\nOperation Summary"
-    summary += "\n" + "=" * 50
-    
-    for i, result in enumerate(results, 1):
-        operation = result.get("operation", "Unknown")
-        success = result.get("success", False)
-        task = result.get("task", "Unknown task")
-        
-        status = "✅" if success else "❌"
-        
-        summary += f"\n{i}. {status} {operation.capitalize()}: {task}"
-        
-        if not success and "error" in result:
-            summary += f"\n   Error: {result['error']}"
-    
-    return summary
-
 def process_transcript():
     """Process an existing transcript"""
     print("\n" + "=" * 50)
@@ -131,14 +110,22 @@ def process_transcript():
     
     # Process the transcript
     print("\nExtracting tasks...")
-    task_operations = extract_tasks(transcript)
     
+    # Comment out Notion version
+    # task_operations = extract_tasks(transcript)
+    # if task_operations:
+    #     # Process task operations
+    #     results = handle_task_operations(task_operations)
+    #     # Print formatted summary
+    #     print(format_operation_summary(results))
+    
+    # Use Trello version
+    task_operations = extract_tasks_trello(transcript)
     if task_operations:
         # Process task operations
-        results = handle_task_operations(task_operations)
-        
+        results = handle_task_operations_trello(task_operations)
         # Print formatted summary
-        print(format_operation_summary(results))
+        print(format_operation_summary_trello(results))
     else:
         print("\nNo task operations found in the transcript.")
 
@@ -160,14 +147,22 @@ def record_meeting():
             
             # Extract tasks from transcript
             print("\nExtracting tasks...")
-            task_operations = extract_tasks(transcript)
             
+            # Comment out Notion version
+            # task_operations = extract_tasks(transcript)
+            # if task_operations:
+            #     # Process task operations
+            #     results = handle_task_operations(task_operations)
+            #     # Print formatted summary
+            #     print(format_operation_summary(results))
+            
+            # Use Trello version
+            task_operations = extract_tasks_trello(transcript)
             if task_operations:
                 # Process task operations
-                results = handle_task_operations(task_operations)
-                
+                results = handle_task_operations_trello(task_operations)
                 # Print formatted summary
-                print(format_operation_summary(results))
+                print(format_operation_summary_trello(results))
             else:
                 print("\nNo task operations found in the transcript.")
         else:

@@ -654,3 +654,23 @@ def create_epic(epic_data):
     else:
         print(f"❌ Failed to create epic: {update_response.text}")
         return False
+
+def format_operation_summary(results):
+    """Format the results of task operations for display"""
+    if not results:
+        return "\nNo operations were performed."
+    
+    summary = "\n\n=== Operation Summary ===\n"
+    
+    for result in results:
+        operation = result.get('operation', 'Unknown')
+        success = result.get('success', False)
+        task = result.get('task', 'Unknown task')
+        
+        if success:
+            summary += f"✅ {operation.capitalize()}: {task}\n"
+        else:
+            error = result.get('error', 'Unknown error')
+            summary += f"❌ {operation.capitalize()}: {task} - {error}\n"
+    
+    return summary

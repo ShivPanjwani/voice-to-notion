@@ -25,12 +25,20 @@ class ConfigManager:
         """Validates that all required configuration values are present"""
         missing_vars = []
         
-        if not self.notion_api_key:
-            missing_vars.append("NOTION_API_KEY")
-        if not self.notion_database_id:
-            missing_vars.append("NOTION_DATABASE_ID")
+        # OpenAI is always required
         if not self.openai_api_key:
             missing_vars.append("OPENAI_API_KEY")
+        
+        # Check if either Notion or Trello is configured
+        notion_configured = self.notion_api_key and self.notion_database_id
+        trello_configured = (
+            os.getenv("TRELLO_API_KEY") and 
+            os.getenv("TRELLO_TOKEN") and 
+            os.getenv("TRELLO_BOARD_ID")
+        )
+        
+        if not (notion_configured or trello_configured):
+            missing_vars.append("Either Notion or Trello configuration")
         
         if missing_vars:
             raise ValueError(f"Missing required configuration values: {', '.join(missing_vars)}")

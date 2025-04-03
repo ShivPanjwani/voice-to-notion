@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Voice-to-Notion Task Manager
-----------------------------
-A tool that extracts tasks from meeting transcripts or live meetings and adds them to Notion.
+Voice Task Manager
+-----------------
+A tool that extracts tasks from meeting transcripts or live meetings and adds them to Notion or Trello.
 """
 
 import os
@@ -11,18 +11,29 @@ from utils.config_manager import ConfigManager
 from utils.setup_wizard import run_setup_wizard
 from agents.audio_recorder import record_audio
 from agents.transcription import transcribe_audio
-from agents.task_extractor import extract_tasks
-#from api.notion_handler import handle_task_operations, format_operation_summary
-# Import Trello handlers
-from agents.task_extractor_trello import extract_tasks_trello
-from api.trello_handler import handle_task_operations_trello, format_operation_summary_trello
 from agents.streaming_processor import StreamingMeetingProcessor
 from agents.meeting_processor import process_meeting
+
+def select_tool():
+    """Ask the user which tool they want to use"""
+    print("\n🔧 Task Management Tool Selection")
+    print("--------------------------------")
+    print("1. Notion")
+    print("2. Trello")
+    
+    while True:
+        choice = input("\nSelect a tool (1-2): ").strip()
+        if choice == "1":
+            return "notion"
+        elif choice == "2":
+            return "trello"
+        else:
+            print("❌ Invalid choice. Please select 1 for Notion or 2 for Trello.")
 
 def main():
     """Main application entry point"""
     print("\n" + "=" * 50)
-    print("Voice-to-Notion Task Manager")
+    print("Voice Task Manager")
     print("=" * 50 + "\n")
     
     # Run setup wizard if .env doesn't exist
@@ -37,6 +48,20 @@ def main():
         print("Please run the setup wizard again to configure your environment.")
         sys.exit(1)
     
+    # Ask user which tool they want to use
+    selected_tool = select_tool()
+    
+    # Import the appropriate modules based on the selected tool
+    if selected_tool == "notion":
+        from agents.task_extractor import extract_tasks
+        from api.notion_handler import handle_task_operations, format_operation_summary
+        print("\n✅ Using Notion for task management")
+    else:  # trello
+        from agents.task_extractor_trello import extract_tasks_trello as extract_tasks
+        from api.trello_handler import handle_task_operations_trello as handle_task_operations
+        from api.trello_handler import format_operation_summary_trello as format_operation_summary
+        print("\n✅ Using Trello for task management")
+    
     # Ask user if they want to process a transcript or record a meeting
     while True:
         print("\nChoose an option:")
@@ -47,31 +72,19 @@ def main():
         choice = input("\nEnter your choice (1/2/3): ")
         
         if choice == "1":
-            process_transcript()
+            process_transcript(extract_tasks, handle_task_operations, format_operation_summary)
             break
         elif choice == "2":
-            record_meeting()
+            record_meeting(extract_tasks, handle_task_operations, format_operation_summary)
             break
         elif choice == "3":
-            stream_meeting()
+            stream_meeting(selected_tool)
             break
         else:
             print("Invalid choice. Please enter 1, 2, or 3.")
 
-def stream_meeting():
-    """Stream a meeting with real-time Notion updates"""
-    print("\n" + "=" * 50)
-    print("Live Streaming Meeting")
-    print("=" * 50)
-    
-    print("\nStarting live streaming with real-time Notion updates.")
-    print("Audio will be processed in chunks and tasks will be updated as they are detected.")
-    
-    # Create and start the streaming processor
-    processor = StreamingMeetingProcessor(chunk_duration=10)  # 10-second chunks
-    processor.start()
 
-def process_transcript():
+def process_transcript(extract_tasks_fn, handle_operations_fn, format_summary_fn):
     """Process an existing transcript"""
     print("\n" + "=" * 50)
     print("Process Transcript")
@@ -111,25 +124,17 @@ def process_transcript():
     # Process the transcript
     print("\nExtracting tasks...")
     
-    # Comment out Notion version
-    # task_operations = extract_tasks(transcript)
-    # if task_operations:
-    #     # Process task operations
-    #     results = handle_task_operations(task_operations)
-    #     # Print formatted summary
-    #     print(format_operation_summary(results))
-    
-    # Use Trello version
-    task_operations = extract_tasks_trello(transcript)
+    task_operations = extract_tasks_fn(transcript)
     if task_operations:
         # Process task operations
-        results = handle_task_operations_trello(task_operations)
+        results = handle_operations_fn(task_operations)
         # Print formatted summary
-        print(format_operation_summary_trello(results))
+        print(format_summary_fn(results))
     else:
         print("\nNo task operations found in the transcript.")
 
-def record_meeting():
+
+def record_meeting(extract_tasks_fn, handle_operations_fn, format_summary_fn):
     """Record and process a meeting"""
     print("\n" + "=" * 50)
     print("Record Meeting")
@@ -148,27 +153,32 @@ def record_meeting():
             # Extract tasks from transcript
             print("\nExtracting tasks...")
             
-            # Comment out Notion version
-            # task_operations = extract_tasks(transcript)
-            # if task_operations:
-            #     # Process task operations
-            #     results = handle_task_operations(task_operations)
-            #     # Print formatted summary
-            #     print(format_operation_summary(results))
-            
-            # Use Trello version
-            task_operations = extract_tasks_trello(transcript)
+            task_operations = extract_tasks_fn(transcript)
             if task_operations:
                 # Process task operations
-                results = handle_task_operations_trello(task_operations)
+                results = handle_operations_fn(task_operations)
                 # Print formatted summary
-                print(format_operation_summary_trello(results))
+                print(format_summary_fn(results))
             else:
                 print("\nNo task operations found in the transcript.")
         else:
             print("\nTranscription failed.")
     else:
         print("\nNo audio recorded. Exiting.")
+
+
+def stream_meeting(selected_tool):
+    """Stream and process a meeting in real-time"""
+    print("\n" + "=" * 50)
+    print("Live Streaming Meeting")
+    print("=" * 50)
+    
+    # Initialize the streaming processor with the selected tool
+    processor = StreamingMeetingProcessor(tool=selected_tool)
+    
+    # Start streaming
+    processor.start_streaming()
+
 
 if __name__ == "__main__":
     main()

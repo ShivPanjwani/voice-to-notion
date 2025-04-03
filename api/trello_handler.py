@@ -2,7 +2,7 @@
 import requests
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import random
 
 def fetch_cards():
@@ -358,12 +358,21 @@ def create_card(task_data):
     trello_token = os.getenv("TRELLO_TOKEN")
     
     # Get the list ID for the status
-    status = task_data.get('status', 'To Do')
+    status = task_data.get('status', 'Not started')
     list_id = get_list_id_by_name(status)
     
     if not list_id:
         print(f"❌ List not found for status: {status}")
-        return False
+        # Try with alternative names as fallbacks
+        fallback_names = ['To Do', 'Not Started', 'Backlog', 'Todo']
+        for fallback in fallback_names:
+            list_id = get_list_id_by_name(fallback)
+            if list_id:
+                print(f"✅ Using '{fallback}' list instead")
+                break
+        
+        if not list_id:
+            return False
     
     # Create the card
     url = "https://api.trello.com/1/cards"
@@ -378,13 +387,31 @@ def create_card(task_data):
     
     # Add due date if provided
     if 'due_date' in task_data:
-        try:
-            # Parse the due date
-            due_date = datetime.strptime(task_data['due_date'], "%Y-%m-%d")
-            # Format for Trello API
-            query['due'] = due_date.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        except ValueError:
-            print(f"❌ Invalid due date format: {task_data['due_date']}")
+        # Check if the date is already in ISO format
+        if 'T' in task_data['due_date'] and 'Z' in task_data['due_date']:
+            # Already in ISO format, adjust timezone
+            query['due'] = adjust_timezone_for_trello(task_data['due_date'])
+        else:
+            try:
+                # Parse the due date
+                due_date = datetime.strptime(task_data['due_date'], "%Y-%m-%d")
+                # Format for Trello API
+                query['due'] = due_date.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            except ValueError:
+                print(f"❌ Invalid due date format: {task_data['due_date']}")
+    elif 'deadline' in task_data:
+        # Check if the date is already in ISO format
+        if 'T' in task_data['deadline'] and 'Z' in task_data['deadline']:
+            # Already in ISO format, adjust timezone
+            query['due'] = adjust_timezone_for_trello(task_data['deadline'])
+        else:
+            try:
+                # Parse the deadline
+                due_date = datetime.strptime(task_data['deadline'], "%Y-%m-%d")
+                # Format for Trello API
+                query['due'] = due_date.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            except ValueError:
+                print(f"❌ Invalid deadline format: {task_data['deadline']}")
     
     response = requests.post(url, params=query)
     
@@ -396,6 +423,13 @@ def create_card(task_data):
             assign_label_to_card({
                 'task': task_data.get('task', 'Unnamed Task'),
                 'epic': task_data['epic']
+            })
+        
+        # Add comment if provided
+        if 'comment' in task_data and task_data['comment']:
+            add_comment_to_card({
+                'task': task_data.get('task', 'Unnamed Task'),
+                'comment': task_data['comment']
             })
         
         return True
@@ -434,14 +468,33 @@ def update_card(task_data):
         else:
             print(f"❌ List not found for status: {task_data['status']}")
     
+    # Check for due_date (from task extractor) or deadline (alternative name)
     if 'due_date' in task_data:
-        try:
-            # Parse the due date
-            due_date = datetime.strptime(task_data['due_date'], "%Y-%m-%d")
-            # Format for Trello API
-            query['due'] = due_date.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        except ValueError:
-            print(f"❌ Invalid due date format: {task_data['due_date']}")
+        # Check if the date is already in ISO format
+        if 'T' in task_data['due_date'] and 'Z' in task_data['due_date']:
+            # Already in ISO format, adjust timezone
+            query['due'] = adjust_timezone_for_trello(task_data['due_date'])
+        else:
+            try:
+                # Parse the due date
+                due_date = datetime.strptime(task_data['due_date'], "%Y-%m-%d")
+                # Format for Trello API
+                query['due'] = due_date.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            except ValueError:
+                print(f"❌ Invalid due date format: {task_data['due_date']}")
+    elif 'deadline' in task_data:
+        # Check if the date is already in ISO format
+        if 'T' in task_data['deadline'] and 'Z' in task_data['deadline']:
+            # Already in ISO format, adjust timezone
+            query['due'] = adjust_timezone_for_trello(task_data['deadline'])
+        else:
+            try:
+                # Parse the deadline
+                due_date = datetime.strptime(task_data['deadline'], "%Y-%m-%d")
+                # Format for Trello API
+                query['due'] = due_date.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            except ValueError:
+                print(f"❌ Invalid deadline format: {task_data['deadline']}")
     
     response = requests.put(url, params=query)
     
@@ -453,9 +506,46 @@ def update_card(task_data):
                 'epic': task_data['epic']
             })
         
+        # Add comment if provided
+        if 'comment' in task_data and task_data['comment']:
+            add_comment_to_card({
+                'task': task_data.get('task', ''),
+                'comment': task_data['comment']
+            })
+        
         return True
     else:
         print(f"❌ Failed to update card: {response.text}")
+        return False
+
+def add_comment_to_card(task_data):
+    """Add a comment to a card in Trello"""
+    trello_api_key = os.getenv("TRELLO_API_KEY")
+    trello_token = os.getenv("TRELLO_TOKEN")
+    
+    # Find the card by name
+    card_id = find_card_by_name(task_data.get('task', ''))
+    
+    if not card_id:
+        print(f"❌ Card not found: {task_data.get('task')}")
+        return False
+    
+    # Add comment to the card
+    url = f"https://api.trello.com/1/cards/{card_id}/actions/comments"
+    
+    query = {
+        'key': trello_api_key,
+        'token': trello_token,
+        'text': task_data.get('comment', '')
+    }
+    
+    response = requests.post(url, params=query)
+    
+    if response.status_code == 200:
+        print(f"✅ Added comment to card: {task_data.get('task')}")
+        return True
+    else:
+        print(f"❌ Failed to add comment: {response.text}")
         return False
 
 def delete_card(task_data):
@@ -515,39 +605,71 @@ def rename_card(task_data):
         print(f"❌ Failed to rename card: {response.text}")
         return False
 
-def handle_task_operations_trello(operations):
-    """Process a list of task operations for Trello"""
+def handle_task_operations_trello(task_operations):
+    """Handle task operations for Trello"""
     results = []
     
-    for op in operations:
-        operation_type = op.get('operation', '')
-        result = {
-            'operation': operation_type,
-            'success': False
-        }
+    for operation in task_operations:
+        op_type = operation.get('operation')
         
-        if operation_type == 'create':
-            result['task'] = op.get('task', '')
-            result['success'] = create_card(op)
-        elif operation_type == 'update':
-            result['task'] = op.get('task', '')
-            result['success'] = update_card(op)
-        elif operation_type == 'delete':
-            result['task'] = op.get('task', '')
-            result['success'] = delete_card(op)
-        elif operation_type == 'rename':
-            result['old_name'] = op.get('old_name', '')
-            result['new_name'] = op.get('new_name', '')
-            result['success'] = rename_card(op)
-        elif operation_type == 'create_epic':
-            result['epic'] = op.get('epic', '')
-            result['success'] = create_label(op)
-        elif operation_type == 'assign_epic':
-            result['task'] = op.get('task', '')
-            result['epic'] = op.get('epic', '')
-            result['success'] = assign_label_to_card(op)
-        
-        results.append(result)
+        if op_type == 'create':
+            success = create_card(operation)
+            results.append({
+                'operation': 'create',
+                'task': operation.get('task'),
+                'success': success
+            })
+        elif op_type == 'update':
+            success = update_card(operation)
+            results.append({
+                'operation': 'update',
+                'task': operation.get('task'),
+                'success': success
+            })
+        elif op_type == 'delete':
+            success = delete_card(operation)
+            results.append({
+                'operation': 'delete',
+                'task': operation.get('task'),
+                'success': success
+            })
+        elif op_type == 'rename':
+            success = rename_card(operation)
+            results.append({
+                'operation': 'rename',
+                'old_name': operation.get('old_name'),
+                'new_name': operation.get('new_name'),
+                'success': success
+            })
+        elif op_type == 'create_epic':
+            success = create_label(operation)
+            results.append({
+                'operation': 'create_epic',
+                'epic': operation.get('epic'),
+                'success': success
+            })
+        elif op_type == 'assign_epic':
+            success = assign_label_to_card(operation)
+            results.append({
+                'operation': 'assign_epic',
+                'task': operation.get('task'),
+                'epic': operation.get('epic'),
+                'success': success
+            })
+        elif op_type == 'comment':
+            success = add_comment_to_card(operation)
+            results.append({
+                'operation': 'comment',
+                'task': operation.get('task'),
+                'success': success
+            })
+        else:
+            print(f"⚠️ Unknown operation type: {op_type}")
+            results.append({
+                'operation': op_type,
+                'success': False,
+                'error': 'Unknown operation type'
+            })
     
     return results
 
@@ -582,6 +704,9 @@ def format_operation_summary_trello(results):
         elif operation == 'assign_epic':
             status = "✅" if success else "❌"
             summary += f"\n{status} Assigned label '{result.get('epic', '')}' to task: '{result.get('task', '')}'"
+        elif operation == 'comment':
+            status = "✅" if success else "❌"
+            summary += f"\n{status} Added comment to task: '{result.get('task', '')}'"
     
     return summary
 
@@ -604,7 +729,7 @@ def fetch_context_for_agent_trello():
             elif 'progress' in name or 'doing' in name or 'working' in name:
                 status_map[list_item['id']] = "In Progress"
             else:
-                status_map[list_item['id']] = "To Do"
+                status_map[list_item['id']] = "Not started"
         
         # Format cards as tasks
         tasks = []
@@ -636,3 +761,26 @@ def fetch_context_for_agent_trello():
             "weekly_summaries": [],
             "execution_insights": []
         }
+
+def adjust_timezone_for_trello(iso_date_string):
+    """
+    Adjust the timezone in an ISO date string for Trello.
+    If the string contains 'T' and 'Z', it's already in ISO format.
+    This function will adjust the time to account for timezone differences.
+    """
+    if 'T' in iso_date_string and 'Z' in iso_date_string:
+        # Parse the ISO date string
+        try:
+            # Remove the Z and parse
+            dt = datetime.strptime(iso_date_string.replace('Z', ''), "%Y-%m-%dT%H:%M:%S.000")
+            
+            # Add 4 hours to adjust for EDT timezone (UTC-4)
+            # You may need to adjust this offset based on your timezone
+            dt = dt + timedelta(hours=4)
+            
+            # Format back to ISO with Z
+            return dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        except ValueError:
+            print(f"⚠️ Could not parse ISO date: {iso_date_string}")
+            return iso_date_string
+    return iso_date_string

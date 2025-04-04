@@ -25,6 +25,11 @@ def extract_tasks_trello(transcription, is_streaming=False):
         labels = fetch_labels()
         label_list = ", ".join([f'"{label}"' for label in labels]) if labels else "No labels found"
         
+        # Fetch board members
+        members = fetch_board_members()
+        member_names = [member.get('fullName', member.get('username', '')) for member in members]
+        member_list = ", ".join([f'"{member}"' for member in member_names]) if member_names else "No members found"
+        
         # Additional context for streaming mode
         streaming_context = """
         IMPORTANT STREAMING INSTRUCTIONS:
@@ -48,6 +53,9 @@ def extract_tasks_trello(transcription, is_streaming=False):
         Available Labels (Epics):
         {label_list}
         
+        Available Members:
+        {member_list}
+        
         {streaming_context}
         
         SPOKEN INPUT TO PROCESS:
@@ -58,32 +66,30 @@ def extract_tasks_trello(transcription, is_streaming=False):
         2. Update existing tasks
         3. Delete tasks when requested
         4. Rename existing tasks        
+        5. Add comments to tasks
+        6. Create or assign labels to tasks (Labels are broad-level categories that group tasks together, similar to epics)
+        7. Assign members to tasks
+        8. Remove members from tasks
+        
         Pay special attention to rename operations which may use phrases like:
         - "update task name X to Y"
         - "rename task X to Y"
         - "change name of task X to Y"
         - "update the name of X to Y"
-        5. Add comments to tasks
-        6. Create or assign labels to tasks (Labels are broad-level categories that group tasks together, similar to epics)
-           - Only create or assign labels when explicitly requested
-           - Do not suggest labels unless asked
-           - When creating a new label, use the "create_epic" operation with ONLY the "epic" field
-           - When assigning an existing label to a task, use the "assign_epic" operation
-           - Use Title Case for all label names (capitalize first letter of each word)
-           - Check if a label with a similar name already exists (ignoring case differences)
-
-        Common phrases that indicate label creation:
-        - "Create a label called X"
-        - "New label named X"
-        - "Add label X"
-        - "Under this label..."
-        - "This label is going to be called X"
-        - "Put these tasks under label X"
-        - "Group these under X"
-        - "Label these as X"
+        
+        For member assignments, listen for phrases like:
+        - "assign X to task Y"
+        - "make X responsible for Y"
+        - "X should work on Y"
+        - "put X on task Y"
+        
+        For member removal, listen for phrases like:
+        - "remove X from task Y"
+        - "X is no longer working on Y"
+        - "take X off task Y"
 
         Return ONLY a JSON array containing task operations. Each operation should have:
-        - "operation": "create", "update", "delete", "comment", "rename", "create_epic", or "assign_epic"
+        - "operation": "create", "update", "delete", "comment", "rename", "create_epic", "assign_epic", "assign_member", or "remove_member"
         - Appropriate fields for that operation type
 
         For rename operations, you MUST include:
@@ -99,6 +105,16 @@ def extract_tasks_trello(transcription, is_streaming=False):
         - "operation": "assign_epic"
         - "task": "exact task name"
         - "epic": "Label Name In Title Case"
+        
+        For assigning a member to a task, you MUST include:
+        - "operation": "assign_member"
+        - "task": "exact task name"
+        - "member": "member name"
+        
+        For removing a member from a task, you MUST include:
+        - "operation": "remove_member"
+        - "task": "exact task name"
+        - "member": "member name"
 
         Example rename operation:
         {{
@@ -117,6 +133,18 @@ def extract_tasks_trello(transcription, is_streaming=False):
             "task": "Prepare for ShopTalk",
             "epic": "Agilow Product"
         }}
+        
+        Example member operations:
+        {{
+            "operation": "assign_member",
+            "task": "Design new landing page",
+            "member": "John Smith"
+        }}
+        {{
+            "operation": "remove_member",
+            "task": "Update documentation",
+            "member": "Jane Doe"
+        }}
 
         Other operation examples:
         [
@@ -125,7 +153,7 @@ def extract_tasks_trello(transcription, is_streaming=False):
                 "task": "Write documentation",
                 "status": "To Do",
                 "deadline": "2023-12-01",
-                "assignee": "John"
+                "member": "John"
             }},
             {{
                 "operation": "update",
@@ -198,6 +226,10 @@ def extract_tasks_trello(transcription, is_streaming=False):
                             print(f"  {i}. Create Label: {op.get('epic', 'unknown')}")
                         elif op_type == "assign_epic":
                             print(f"  {i}. Assign Label: {op.get('task', 'unknown')} to {op.get('epic', 'unknown')}")
+                        elif op_type == "assign_member":
+                            print(f"  {i}. Assign Member: {op.get('member', 'unknown')} to {op.get('task', 'unknown')}")
+                        elif op_type == "remove_member":
+                            print(f"  {i}. Remove Member: {op.get('member', 'unknown')} from {op.get('task', 'unknown')}")
                         else:
                             print(f"  {i}. {op_type.capitalize()}: {op}")
                 else:

@@ -605,113 +605,310 @@ def rename_card(task_data):
         print(f"❌ Failed to rename card: {response.text}")
         return False
 
-def handle_task_operations_trello(task_operations):
+def get_member_id_by_name(member_name):
+    """Get a member ID by name"""
+    trello_api_key = os.getenv("TRELLO_API_KEY")
+    trello_token = os.getenv("TRELLO_TOKEN")
+    trello_board_id = os.getenv("TRELLO_BOARD_ID")
+    
+    url = f"https://api.trello.com/1/boards/{trello_board_id}/members"
+    
+    query = {
+        'key': trello_api_key,
+        'token': trello_token
+    }
+    
+    response = requests.get(url, params=query)
+    
+    if response.status_code == 200:
+        members = response.json()
+        
+        # Try to find a member with a matching name (case-insensitive)
+        for member in members:
+            full_name = member.get('fullName', '')
+            username = member.get('username', '')
+            
+            if (full_name.lower() == member_name.lower() or 
+                username.lower() == member_name.lower()):
+                return member.get('id')
+        
+        print(f"❌ Member not found: {member_name}")
+        return None
+    else:
+        print(f"❌ Failed to fetch board members: {response.text}")
+        return None
+
+def assign_member_to_card(task_data):
+    """Assign a member to a card in Trello"""
+    trello_api_key = os.getenv("TRELLO_API_KEY")
+    trello_token = os.getenv("TRELLO_TOKEN")
+    
+    # Find the card by name
+    card_id = find_card_by_name(task_data.get('task', ''))
+    
+    if not card_id:
+        print(f"❌ Card not found: {task_data.get('task')}")
+        return False
+    
+    # Find the member by name
+    member_id = get_member_id_by_name(task_data.get('member', ''))
+    
+    if not member_id:
+        print(f"❌ Member not found: {task_data.get('member')}")
+        return False
+    
+    url = f"https://api.trello.com/1/cards/{card_id}/idMembers"
+    
+    query = {
+        'key': trello_api_key,
+        'token': trello_token,
+        'value': member_id
+    }
+    
+    response = requests.post(url, params=query)
+    
+    if response.status_code == 200:
+        print(f"✅ Member assigned to card: {task_data.get('member')} → {task_data.get('task')}")
+        return True
+    else:
+        print(f"❌ Failed to assign member to card: {response.text}")
+        return False
+
+def remove_member_from_card(task_data):
+    """Remove a member from a card in Trello"""
+    trello_api_key = os.getenv("TRELLO_API_KEY")
+    trello_token = os.getenv("TRELLO_TOKEN")
+    
+    # Find the card by name
+    card_id = find_card_by_name(task_data.get('task', ''))
+    
+    if not card_id:
+        print(f"❌ Card not found: {task_data.get('task')}")
+        return False
+    
+    # Find the member by name
+    member_id = get_member_id_by_name(task_data.get('member', ''))
+    
+    if not member_id:
+        print(f"❌ Member not found: {task_data.get('member')}")
+        return False
+    
+    url = f"https://api.trello.com/1/cards/{card_id}/idMembers/{member_id}"
+    
+    query = {
+        'key': trello_api_key,
+        'token': trello_token
+    }
+    
+    response = requests.delete(url, params=query)
+    
+    if response.status_code == 200:
+        print(f"✅ Member removed from card: {task_data.get('member')} ← {task_data.get('task')}")
+        return True
+    else:
+        print(f"❌ Failed to remove member from card: {response.text}")
+        return False
+
+def handle_task_operations_trello(operations):
     """Handle task operations for Trello"""
     results = []
     
-    for operation in task_operations:
-        op_type = operation.get('operation')
+    for op in operations:
+        operation_type = op.get('operation', '')
         
-        if op_type == 'create':
-            success = create_card(operation)
+        try:
+            if operation_type == 'create':
+                success = create_card(op)
+                results.append({
+                    'operation': 'create',
+                    'task': op.get('task'),
+                    'success': success
+                })
+            
+            elif operation_type == 'update':
+                success = update_card(op)
+                results.append({
+                    'operation': 'update',
+                    'task': op.get('task'),
+                    'success': success
+                })
+            
+            elif operation_type == 'delete':
+                success = delete_card(op)
+                results.append({
+                    'operation': 'delete',
+                    'task': op.get('task'),
+                    'success': success
+                })
+            
+            elif operation_type == 'rename':
+                success = rename_card(op)
+                results.append({
+                    'operation': 'rename',
+                    'old_name': op.get('old_name'),
+                    'new_name': op.get('new_name'),
+                    'success': success
+                })
+            
+            elif operation_type == 'comment':
+                success = add_comment_to_card(op)
+                results.append({
+                    'operation': 'comment',
+                    'task': op.get('task'),
+                    'success': success
+                })
+            
+            elif operation_type == 'create_epic':
+                success = create_label(op)
+                results.append({
+                    'operation': 'create_epic',
+                    'epic': op.get('epic'),
+                    'success': success
+                })
+            
+            elif operation_type == 'assign_epic':
+                success = assign_label_to_card(op)
+                results.append({
+                    'operation': 'assign_epic',
+                    'task': op.get('task'),
+                    'epic': op.get('epic'),
+                    'success': success
+                })
+            
+            elif operation_type == 'assign_member':
+                success = assign_member_to_card(op)
+                results.append({
+                    'operation': 'assign_member',
+                    'task': op.get('task'),
+                    'member': op.get('member'),
+                    'success': success
+                })
+            
+            elif operation_type == 'remove_member':
+                success = remove_member_from_card(op)
+                results.append({
+                    'operation': 'remove_member',
+                    'task': op.get('task'),
+                    'member': op.get('member'),
+                    'success': success
+                })
+            
+            else:
+                print(f"❌ Unknown operation type: {operation_type}")
+                results.append({
+                    'operation': operation_type,
+                    'success': False,
+                    'error': 'Unknown operation type'
+                })
+        
+        except Exception as e:
+            print(f"❌ Error processing operation {operation_type}: {str(e)}")
             results.append({
-                'operation': 'create',
-                'task': operation.get('task'),
-                'success': success
-            })
-        elif op_type == 'update':
-            success = update_card(operation)
-            results.append({
-                'operation': 'update',
-                'task': operation.get('task'),
-                'success': success
-            })
-        elif op_type == 'delete':
-            success = delete_card(operation)
-            results.append({
-                'operation': 'delete',
-                'task': operation.get('task'),
-                'success': success
-            })
-        elif op_type == 'rename':
-            success = rename_card(operation)
-            results.append({
-                'operation': 'rename',
-                'old_name': operation.get('old_name'),
-                'new_name': operation.get('new_name'),
-                'success': success
-            })
-        elif op_type == 'create_epic':
-            success = create_label(operation)
-            results.append({
-                'operation': 'create_epic',
-                'epic': operation.get('epic'),
-                'success': success
-            })
-        elif op_type == 'assign_epic':
-            success = assign_label_to_card(operation)
-            results.append({
-                'operation': 'assign_epic',
-                'task': operation.get('task'),
-                'epic': operation.get('epic'),
-                'success': success
-            })
-        elif op_type == 'comment':
-            success = add_comment_to_card(operation)
-            results.append({
-                'operation': 'comment',
-                'task': operation.get('task'),
-                'success': success
-            })
-        else:
-            print(f"⚠️ Unknown operation type: {op_type}")
-            results.append({
-                'operation': op_type,
+                'operation': operation_type,
                 'success': False,
-                'error': 'Unknown operation type'
+                'error': str(e)
             })
     
     return results
 
 def format_operation_summary_trello(results):
-    """Format a summary of the operations performed"""
+    """Format the results of task operations for display"""
     if not results:
-        return "No operations performed."
+        return "\nNo operations were performed."
     
-    success_count = sum(1 for result in results if result.get('success', False))
-    
-    summary = f"\n✅ Successfully processed {success_count} of {len(results)} operations.\n"
+    summary = "\n\n=== Operation Summary ===\n"
     
     for result in results:
-        operation = result.get('operation', '')
+        operation = result.get('operation', 'Unknown')
         success = result.get('success', False)
         
         if operation == 'create':
-            status = "✅" if success else "❌"
-            summary += f"\n{status} Created task: '{result.get('task', '')}'"
+            task = result.get('task', 'Unknown task')
+            if success:
+                summary += f"✅ Created: {task}\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ Failed to create: {task} - {error}\n"
+        
         elif operation == 'update':
-            status = "✅" if success else "❌"
-            summary += f"\n{status} Updated task: '{result.get('task', '')}'"
+            task = result.get('task', 'Unknown task')
+            if success:
+                summary += f"✅ Updated: {task}\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ Failed to update: {task} - {error}\n"
+        
         elif operation == 'delete':
-            status = "✅" if success else "❌"
-            summary += f"\n{status} Deleted task: '{result.get('task', '')}'"
+            task = result.get('task', 'Unknown task')
+            if success:
+                summary += f"✅ Deleted: {task}\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ Failed to delete: {task} - {error}\n"
+        
         elif operation == 'rename':
-            status = "✅" if success else "❌"
-            summary += f"\n{status} Renamed task: '{result.get('old_name', '')}' to '{result.get('new_name', '')}'"
+            old_name = result.get('old_name', 'Unknown task')
+            new_name = result.get('new_name', 'Unknown task')
+            if success:
+                summary += f"✅ Renamed: {old_name} → {new_name}\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ Failed to rename: {old_name} - {error}\n"
+        
         elif operation == 'create_epic':
-            status = "✅" if success else "❌"
-            summary += f"\n{status} Created label: '{result.get('epic', '')}'"
+            epic = result.get('epic', 'Unknown epic')
+            if success:
+                summary += f"✅ Created label: {epic}\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ Failed to create label: {epic} - {error}\n"
+        
         elif operation == 'assign_epic':
-            status = "✅" if success else "❌"
-            summary += f"\n{status} Assigned label '{result.get('epic', '')}' to task: '{result.get('task', '')}'"
+            task = result.get('task', 'Unknown task')
+            epic = result.get('epic', 'Unknown epic')
+            if success:
+                summary += f"✅ Assigned label: {epic} → {task}\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ Failed to assign label: {epic} → {task} - {error}\n"
+        
         elif operation == 'comment':
-            status = "✅" if success else "❌"
-            summary += f"\n{status} Added comment to task: '{result.get('task', '')}'"
+            task = result.get('task', 'Unknown task')
+            if success:
+                summary += f"✅ Added comment to: {task}\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ Failed to add comment to: {task} - {error}\n"
+        
+        elif operation == 'assign_member':
+            task = result.get('task', 'Unknown task')
+            member = result.get('member', 'Unknown member')
+            if success:
+                summary += f"✅ Assigned member: {member} → {task}\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ Failed to assign member: {member} → {task} - {error}\n"
+        
+        elif operation == 'remove_member':
+            task = result.get('task', 'Unknown task')
+            member = result.get('member', 'Unknown member')
+            if success:
+                summary += f"✅ Removed member: {member} ← {task}\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ Failed to remove member: {member} ← {task} - {error}\n"
+        
+        else:
+            if success:
+                summary += f"✅ {operation.capitalize()} operation successful\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ {operation.capitalize()} operation failed: {error}\n"
     
     return summary
 
-def fetch_context_for_agent_trello():
-    """Fetch context data from Trello for the Agilow agent"""
+def fetch_context_for_agent():
+    """Fetch context from Trello for the agent"""
     try:
         # Fetch cards (tasks)
         cards = fetch_cards()

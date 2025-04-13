@@ -1504,6 +1504,213 @@ def handle_task_operations_trello(operations):
                         'error': 'Card not found'
                     })
             
+            elif operation_type == 'add_reflection_positive':
+                # Find the card ID for the "What's going well?" list
+                list_id = find_list_by_name("What's going well?")
+                if not list_id:
+                    error_message = "Could not find 'What's going well?' list"
+                    print(f"❌ {error_message}")
+                    results.append({
+                        'operation': 'add_reflection_positive',
+                        'task': op.get('task'),
+                        'success': False,
+                        'error': error_message
+                    })
+                    continue
+                
+                # Create a card with the same name as the task
+                task_name = op.get('task', '')
+                items = op.get('items', [])
+                
+                # Format items as a numbered list
+                description = format_numbered_list(items)
+                
+                # Create the card
+                trello_api_key = os.getenv("TRELLO_API_KEY")
+                trello_token = os.getenv("TRELLO_TOKEN")
+                
+                try:
+                    url = "https://api.trello.com/1/cards"
+                    
+                    query = {
+                        'key': trello_api_key,
+                        'token': trello_token,
+                        'idList': list_id,
+                        'name': task_name,
+                        'desc': description
+                    }
+                    
+                    response = requests.post(url, params=query)
+                    response.raise_for_status()
+                    
+                    results.append({
+                        'operation': 'add_reflection_positive',
+                        'task': task_name,
+                        'success': True
+                    })
+                except Exception as e:
+                    error_message = str(e)
+                    print(f"❌ Failed to create reflection card: {error_message}")
+                    results.append({
+                        'operation': 'add_reflection_positive',
+                        'task': task_name,
+                        'success': False,
+                        'error': error_message
+                    })
+            
+            elif operation_type == 'add_reflection_negative':
+                # Find the card ID for the "What's not going well?" list
+                list_id = find_list_by_name("What's not going well?")
+                if not list_id:
+                    error_message = "Could not find 'What's not going well?' list"
+                    print(f"❌ {error_message}")
+                    results.append({
+                        'operation': 'add_reflection_negative',
+                        'task': op.get('task'),
+                        'success': False,
+                        'error': error_message
+                    })
+                    continue
+                
+                # Create a card with the same name as the task
+                task_name = op.get('task', '')
+                issues = op.get('issues', [])
+                lessons_learned = op.get('lessons_learned', [])
+                
+                # Format issues as a numbered list
+                description = format_numbered_list(issues)
+                
+                # Create the card
+                trello_api_key = os.getenv("TRELLO_API_KEY")
+                trello_token = os.getenv("TRELLO_TOKEN")
+                
+                try:
+                    url = "https://api.trello.com/1/cards"
+                    
+                    query = {
+                        'key': trello_api_key,
+                        'token': trello_token,
+                        'idList': list_id,
+                        'name': task_name,
+                        'desc': description
+                    }
+                    
+                    response = requests.post(url, params=query)
+                    response.raise_for_status()
+                    
+                    # Get the card ID
+                    card_id = response.json().get('id')
+                    
+                    # Add lessons learned as a comment
+                    if card_id and lessons_learned:
+                        lessons_text = format_numbered_list(lessons_learned)
+                        comment_text = f"Lessons Learned:\n{lessons_text}"
+                        
+                        comment_url = f"https://api.trello.com/1/cards/{card_id}/actions/comments"
+                        comment_query = {
+                            'key': trello_api_key,
+                            'token': trello_token,
+                            'text': comment_text
+                        }
+                        
+                        comment_response = requests.post(comment_url, params=comment_query)
+                        comment_response.raise_for_status()
+                    
+                    results.append({
+                        'operation': 'add_reflection_negative',
+                        'task': task_name,
+                        'success': True
+                    })
+                except Exception as e:
+                    error_message = str(e)
+                    print(f"❌ Failed to create reflection card: {error_message}")
+                    results.append({
+                        'operation': 'add_reflection_negative',
+                        'task': task_name,
+                        'success': False,
+                        'error': error_message
+                    })
+            
+            elif operation_type == 'create_improvement_task':
+                # Find the card ID for the "What changes/ideas to make?" list
+                list_id = find_list_by_name("What changes/ideas to make?")
+                if not list_id:
+                    error_message = "Could not find 'What changes/ideas to make?' list"
+                    print(f"❌ {error_message}")
+                    results.append({
+                        'operation': 'create_improvement_task',
+                        'task_name': op.get('task_name'),
+                        'success': False,
+                        'error': error_message
+                    })
+                    continue
+                
+                # Get task details
+                task_name = op.get('task_name', '')
+                checklist_items = op.get('checklist_items', [])
+                
+                # Create the card
+                trello_api_key = os.getenv("TRELLO_API_KEY")
+                trello_token = os.getenv("TRELLO_TOKEN")
+                
+                try:
+                    url = "https://api.trello.com/1/cards"
+                    
+                    query = {
+                        'key': trello_api_key,
+                        'token': trello_token,
+                        'idList': list_id,
+                        'name': task_name
+                    }
+                    
+                    response = requests.post(url, params=query)
+                    response.raise_for_status()
+                    
+                    # Get the card ID
+                    card_id = response.json().get('id')
+                    
+                    # Add checklist items
+                    if card_id and checklist_items:
+                        # Create a checklist
+                        checklist_url = f"https://api.trello.com/1/checklists"
+                        checklist_query = {
+                            'key': trello_api_key,
+                            'token': trello_token,
+                            'idCard': card_id,
+                            'name': 'Action Items'
+                        }
+                        
+                        checklist_response = requests.post(checklist_url, params=checklist_query)
+                        checklist_response.raise_for_status()
+                        checklist_id = checklist_response.json().get('id')
+                        
+                        # Add items to the checklist
+                        for item in checklist_items:
+                            item_url = f"https://api.trello.com/1/checklists/{checklist_id}/checkItems"
+                            item_query = {
+                                'key': trello_api_key,
+                                'token': trello_token,
+                                'name': item
+                            }
+                            
+                            item_response = requests.post(item_url, params=item_query)
+                            item_response.raise_for_status()
+                    
+                    results.append({
+                        'operation': 'create_improvement_task',
+                        'task_name': task_name,
+                        'success': True
+                    })
+                except Exception as e:
+                    error_message = str(e)
+                    print(f"❌ Failed to create improvement task: {error_message}")
+                    results.append({
+                        'operation': 'create_improvement_task',
+                        'task_name': task_name,
+                        'success': False,
+                        'error': error_message
+                    })
+            
             else:
                 print(f"❌ Unknown operation type: {operation_type}")
                 results.append({
@@ -1659,6 +1866,30 @@ def format_operation_summary_trello(results):
                 error = result.get('error', 'Unknown error')
                 summary += f"❌ Failed to delete checklist: '{checklist}' from '{card}' - {error}\n"
         
+        elif operation == 'add_reflection_positive':
+            task = result.get('task', 'Unknown task')
+            if success:
+                summary += f"✅ Added positive reflection for: {task}\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ Failed to add positive reflection for: {task} - {error}\n"
+        
+        elif operation == 'add_reflection_negative':
+            task = result.get('task', 'Unknown task')
+            if success:
+                summary += f"✅ Added negative reflection and lessons learned for: {task}\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ Failed to add negative reflection for: {task} - {error}\n"
+        
+        elif operation == 'create_improvement_task':
+            task_name = result.get('task_name', 'Unknown task')
+            if success:
+                summary += f"✅ Created improvement task: {task_name}\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ Failed to create improvement task: {task_name} - {error}\n"
+        
         else:
             if success:
                 summary += f"✅ {operation.capitalize()} operation successful\n"
@@ -1782,3 +2013,21 @@ def get_best_fuzzy_match(target, candidates, threshold=0.75):
         return best_match, ratio
     
     return None, 0
+
+def format_numbered_list(items):
+    """Format a list of items as a numbered list string"""
+    if not items:
+        return ""
+    return "\n".join([f"{i+1}. {item}" for i, item in enumerate(items)])
+
+def find_list_by_name(list_name):
+    """Find a list ID by name"""
+    try:
+        lists = fetch_lists()
+        for list_item in lists:
+            if list_item['name'].lower() == list_name.lower():
+                return list_item['id']
+        return None
+    except Exception as e:
+        print(f"❌ Error finding list: {str(e)}")
+        return None

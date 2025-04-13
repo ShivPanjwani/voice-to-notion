@@ -61,7 +61,8 @@ def extract_tasks_trello(transcription, is_streaming=False):
         SPOKEN INPUT TO PROCESS:
         "{transcription}"
 
-        You are a project management AI. Your role is to extract task operations from spoken input and/or user provided transcription from user's meetings. 
+        You are a project management AI. Your role is to extract task operations from spoken input and/or user provided transcription from user's meetings. Additionally, your role also includes extracting retrospective items of what's going well, what's not going well in relation to each task, and what changes or ideas to make based on the lessons learned from what's not going well or any new ideas discussed by the user.
+        
         1. Create new tasks
         2. Update existing tasks
         3. Delete tasks when requested
@@ -73,6 +74,9 @@ def extract_tasks_trello(transcription, is_streaming=False):
         9. Create checklists in tasks (checklists are sub-tasks or items within a task)
         10. Update checklists status in tasks
         11. Delete checklists in tasks
+        12. Add positive aspects related to the tasks to the "What's going well?" column
+        13. Add challenges and lessons learned related to the tasksto the "What's not going well?" column
+        14. Add improvement ideas to the "What changes/ideas to make?" column based on lessons learned or new ideas. The improvement ideas should be based on the lessons learned or new ideas discussed by the user. They may arise from exisiting tasks or may be new ideas that the user wants to implement.
         
         IMPORTANT: When a user talks about marking checklist items as done or complete, do NOT change the status of the parent task/card unless explicitly requested. Changing the status of checklist items should not affect the overall task status.
         
@@ -145,15 +149,6 @@ def extract_tasks_trello(transcription, is_streaming=False):
         - "delete the Z checklist for task X"
         - "delete the checklist for task X"
 
-        Return ONLY a JSON array containing task operations. Each operation should have:
-        - "operation": "create", "update", "delete", "comment", "rename", "create_epic", "assign_epic", "assign_member", "remove_member", "create_checklist", "update_checklist_item", or "delete_checklist_item"
-        - Appropriate fields for that operation type
-
-        For rename operations, you MUST include:
-        - "operation": "rename"
-        - "old_name": "exact existing task name"
-        - "new_name": "new task name"
-
         For updating a checklist item status, you MUST include:
         - "operation": "update_checklist_item"
         - "card": "exact card name"
@@ -166,6 +161,39 @@ def extract_tasks_trello(transcription, is_streaming=False):
         - "card": "exact card name"
         - "checklist": "exact checklist name"
         - "item": "exact item name"
+
+        For retrospective reflections, listen for patterns like:
+        - "what's going well with [task name]"
+        - "what went well for [task name]"
+        - "the good things about [task name] are"
+        - "we're making progress on [task name] with"
+        - "what's not going well with [task name]"
+        - "what didn't go well for [task name]"
+        - "we're having issues with [task name]"
+        - "lessons learned from [task name]"
+        - "for next time we should"
+        - "changes we need to make for [task name]"
+        - "ideas for improving [task name]"
+        
+        IMPORTANT: Every cardin the "What's going well?" and "What's not going well?" columns must match exactly with an existing task name from the "Not started", "In Progress", or "Done" columns.
+        The idea is that every card in the "What's going well?" and "What's not going well?" columns should be a reflection (associated with) of a task in the "Not started", "In Progress", or "Done" columns.
+        
+        IMPORTANT: For "What's going well?" cards, always include positive aspects as a numbered list in the description field. 
+       
+        IMPORTANT: For "What's not going well?" cards, always include challenges as a numbered list in the desicription field and the associated lessons learned as numbered list in the comments field. 
+        Note that for every challenge listed in the description field, there should be a corresponding lesson learned in the comments field.
+        
+        IMPORTANT: For "What changes/ideas to make?" cards, create a new descriptive task name and add checklist items based on lessons learned from "What's not going well?" or new ideas mentioned.
+        Note that for every lesson learned listed in the comments field of the "What's not going well?" card, there should be a corresponding checklist item in the "What changes/ideas to make?" card.
+
+        Return ONLY a JSON array containing task operations. Each operation should have:
+        - "operation": "create", "update", "delete", "comment", "rename", "create_epic", "assign_epic", "assign_member", "remove_member", "create_checklist", "update_checklist_item", or "delete_checklist_item"
+        - Appropriate fields for that operation type
+
+        For rename operations, you MUST include:
+        - "operation": "rename"
+        - "old_name": "exact existing task name"
+        - "new_name": "new task name"
 
         For creating a new label, you MUST include:
         - "operation": "create_epic"
@@ -185,6 +213,23 @@ def extract_tasks_trello(transcription, is_streaming=False):
         - "operation": "remove_member"
         - "task": "exact task name"
         - "member": "member name"
+
+        For adding positive reflections (what's going well), you MUST include:
+        - "operation": "add_reflection_positive"
+        - "task": "exact task name"
+        - "items": ["item 1", "item 2", ...] - List of things going well
+
+        For adding negative reflections (what's not going well), you MUST include:
+        - "operation": "add_reflection_negative"
+        - "task": "exact task name"
+        - "issues": ["issue 1", "issue 2", ...] - List of things not going well
+        - "lessons_learned": ["lesson 1", "lesson 2", ...] - List of lessons learned from issues
+
+        For creating improvement tasks, you MUST include:
+        - "operation": "create_improvement_task"
+        - "task_name": "descriptive name for the improvement task"
+        - "description": "descriptive synthesis of the lessons learned from the associated what's not going well card"
+        -"checklist_items": ["item 1", "item 2", ...] - List of action items derived from lessons learned
 
         Example rename operation:
         {{
@@ -272,6 +317,25 @@ def extract_tasks_trello(transcription, is_streaming=False):
                 "status": "Done"
             }}
         ]
+
+        Example retrospective operations:
+        {{
+            "operation": "add_reflection_positive",
+            "task": "Prepare Investor Deck",
+            "items": ["The design layout was well executed", "Team collaboration was excellent"]
+        }}
+        {{
+            "operation": "add_reflection_negative",
+            "task": "Prepare Investor Deck",
+            "issues": ["ChatGPT did a poor job with image creation for the flyer", "We could have improved our pitch for the investor"],
+            "lessons_learned": ["Use Gamma for presentations instead of ChatGPT image creator", "Make sure to practice the pitch and review with a friend before Pitch Day"]
+        }}
+        {{
+            "operation": "create_improvement_task",
+            "task_name": "Improve Presentation Process",
+            "checklist_items": ["Use Gamma for presentations instead of ChatGPT image creator", "Practice pitch with friend before Pitch Day", "Create template library for future presentations"],
+            "description": "The presentation could have been better. We should have practiced the ending segment of the pitch with a strong call to action. Practcing with a friend would have helped us improve our delivery."
+        }}
 
         Do not include any explanations or text outside the JSON array.
         Ensure exact task names are used when referencing existing tasks.

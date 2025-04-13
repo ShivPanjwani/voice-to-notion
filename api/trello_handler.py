@@ -4,6 +4,8 @@ import json
 import os
 from datetime import datetime, timedelta
 import random
+import re
+import difflib  # Add this for fuzzy string matching
 
 def fetch_cards():
     """Fetch all cards from Trello"""
@@ -709,6 +711,573 @@ def remove_member_from_card(task_data):
         print(f"❌ Failed to remove member from card: {response.text}")
         return False
 
+# New function for creating checklists
+def create_checklist(card_id, checklist_name, items):
+    """
+    Create a checklist in a Trello card.
+
+    Args:
+        card_id (str): The ID of the Trello card.
+        checklist_name (str): The name of the checklist.
+        items (list): A list of items to add to the checklist.
+
+    Returns:
+        bool: True if the checklist was created successfully, False otherwise.
+    """
+    trello_api_key = os.getenv("TRELLO_API_KEY")
+    trello_token = os.getenv("TRELLO_TOKEN")
+
+    # Create the checklist
+    url = f"https://api.trello.com/1/cards/{card_id}/checklists"
+    query = {
+        'key': trello_api_key,
+        'token': trello_token,
+        'name': checklist_name
+    }
+
+    response = requests.post(url, params=query)
+
+    if response.status_code == 200:
+        checklist_id = response.json().get('id')
+        print(f"✅ Created checklist '{checklist_name}' in card {card_id}")
+
+        # Add items to the checklist
+        for item in items:
+            add_checklist_item(checklist_id, item)
+
+        return True
+    else:
+        print(f"❌ Failed to create checklist: {response.text}")
+        return False
+
+
+def add_checklist_item(checklist_id, item_name):
+    """
+    Add an item to a checklist.
+
+    Args:
+        checklist_id (str): The ID of the checklist.
+        item_name (str): The name of the item to add.
+
+    Returns:
+        bool: True if the item was added successfully, False otherwise.
+    """
+    trello_api_key = os.getenv("TRELLO_API_KEY")
+    trello_token = os.getenv("TRELLO_TOKEN")
+
+    url = f"https://api.trello.com/1/checklists/{checklist_id}/checkItems"
+    query = {
+        'key': trello_api_key,
+        'token': trello_token,
+        'name': item_name
+    }
+
+    response = requests.post(url, params=query)
+
+    if response.status_code == 200:
+        print(f"✅ Added item '{item_name}' to checklist {checklist_id}")
+        return True
+    else:
+        print(f"❌ Failed to add item to checklist: {response.text}")
+        return False
+
+def find_checklist_by_position(card_id, position_text):
+    """
+    Find a checklist by its ordinal position in a card's list of checklists.
+    
+    Args:
+        card_id (str): The ID of the card.
+        position_text (str): Text describing the position (e.g., "first", "second", etc.)
+        
+    Returns:
+        str or None: The ID of the checklist if found, None otherwise.
+    """
+    trello_api_key = os.getenv("TRELLO_API_KEY")
+    trello_token = os.getenv("TRELLO_TOKEN")
+    
+    # Map position text to 0-based index
+    position_map = {
+        'first': 0, '1st': 0,
+        'second': 1, '2nd': 1,
+        'third': 2, '3rd': 2,
+        'fourth': 3, '4th': 3,
+        'fifth': 4, '5th': 4,
+        'sixth': 5, '6th': 5,
+        'seventh': 6, '7th': 6,
+        'eighth': 7, '8th': 7,
+        'ninth': 8, '9th': 8,
+        'tenth': 9, '10th': 9
+    }
+    
+    # Try to parse the position
+    # Check for positional text
+    position = position_map.get(position_text.lower(), -1)
+    
+    # If not found, try numeric format (e.g., "checklist 1")
+    if position == -1:
+        match = re.match(r'^checklist\s+(\d+)$', position_text.lower())
+        if match:
+            position = int(match.group(1)) - 1  # Convert to 0-based index
+    
+    # If still not found, it's not a positional reference
+    if position == -1:
+        return None
+        
+    # Get the checklists for the card
+    url = f"https://api.trello.com/1/cards/{card_id}/checklists"
+    query = {
+        'key': trello_api_key,
+        'token': trello_token
+    }
+    
+    response = requests.get(url, params=query)
+    
+    if response.status_code == 200:
+        checklists = response.json()
+        
+        # Debug info
+        print(f"Looking for the {position_text} checklist (index {position}) in card {card_id}")
+        print(f"Found {len(checklists)} checklists in card {card_id}")
+        for i, checklist in enumerate(checklists):
+            print(f"Checklist {i+1}: '{checklist.get('name', '')}' (ID: {checklist.get('id', '')})")
+        
+        # Check if the position is valid
+        if 0 <= position < len(checklists):
+            checklist = checklists[position]
+            print(f"✅ Using positional match: '{checklist.get('name', '')}' as the {position_text} checklist")
+            return checklist.get("id")
+        else:
+            print(f"❌ Position out of range: {position_text} (index {position}). Only {len(checklists)} checklists available.")
+            return None
+    else:
+        print(f"❌ Failed to fetch checklists: {response.text}")
+        return None
+
+def find_checklist_by_name(card_id, checklist_name):
+    """
+    Find a checklist by its name in a card.
+
+    Args:
+        card_id (str): The ID of the card.
+        checklist_name (str): The name of the checklist to find.
+
+    Returns:
+        str or None: The ID of the checklist if found, None otherwise.
+    """
+    # Check if it's a positional reference like "first checklist"
+    position_match = re.match(r'^(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th|sixth|seventh|eighth|ninth|tenth|6th|7th|8th|9th|10th)\s+(checklist)$', checklist_name.lower())
+    if position_match:
+        position_text = position_match.group(1)
+        checklist_id = find_checklist_by_position(card_id, position_text)
+        if checklist_id:
+            return checklist_id
+    
+    # Check if it's a numeric reference like "checklist 1"
+    num_match = re.match(r'^checklist\s+(\d+)$', checklist_name.lower())
+    if num_match:
+        position_text = checklist_name.lower()
+        checklist_id = find_checklist_by_position(card_id, position_text)
+        if checklist_id:
+            return checklist_id
+    
+    trello_api_key = os.getenv("TRELLO_API_KEY")
+    trello_token = os.getenv("TRELLO_TOKEN")
+
+    url = f"https://api.trello.com/1/cards/{card_id}/checklists"
+    query = {
+        'key': trello_api_key,
+        'token': trello_token
+    }
+
+    response = requests.get(url, params=query)
+
+    if response.status_code == 200:
+        checklists = response.json()
+        
+        # Debug info
+        print(f"Found {len(checklists)} checklists in card {card_id}")
+        for checklist in checklists:
+            print(f"Available checklist: '{checklist.get('name', '')}' (ID: {checklist.get('id', '')})")
+        
+        # Case-insensitive exact match
+        for checklist in checklists:
+            if checklist.get("name", "").lower() == checklist_name.lower():
+                return checklist.get("id")
+            
+        # If no exact match, try fuzzy matching
+        if checklists:
+            checklist_names = [c.get('name', '') for c in checklists]
+            best_match, similarity = get_best_fuzzy_match(checklist_name, checklist_names, threshold=0.7)
+            
+            if best_match:
+                # Find the ID for the best match
+                for checklist in checklists:
+                    if checklist.get("name", "") == best_match:
+                        print(f"✓ Using fuzzy match: '{best_match}' for '{checklist_name}' (similarity: {similarity:.2f})")
+                        return checklist.get("id")
+            
+        # If there's only one checklist, use it regardless of name
+        if len(checklists) == 1:
+            print(f"Only one checklist found ('{checklists[0].get('name', '')}'), using it for '{checklist_name}'")
+            return checklists[0].get("id")
+            
+        print(f"❌ Checklist not found: '{checklist_name}' - Available checklists: {[c.get('name', '') for c in checklists]}")
+        return None
+    else:
+        print(f"❌ Failed to fetch checklists: {response.text}")
+        return None
+
+def find_checklist_item_by_position(checklist_id, position_text):
+    """
+    Find a checklist item by its position in the checklist.
+    
+    Args:
+        checklist_id (str): The ID of the checklist.
+        position_text (str): The position text (e.g., "first", "second", "third", etc.)
+        
+    Returns:
+        str or None: The ID of the item if found, None otherwise.
+    """
+    trello_api_key = os.getenv("TRELLO_API_KEY")
+    trello_token = os.getenv("TRELLO_TOKEN")
+    
+    # Map position text to 0-based index
+    position_map = {
+        'first': 0, '1st': 0,
+        'second': 1, '2nd': 1,
+        'third': 2, '3rd': 2,
+        'fourth': 3, '4th': 3,
+        'fifth': 4, '5th': 4,
+        'sixth': 5, '6th': 5,
+        'seventh': 6, '7th': 6,
+        'eighth': 7, '8th': 7,
+        'ninth': 8, '9th': 8,
+        'tenth': 9, '10th': 9
+    }
+    
+    # Try to parse the position
+    # Check for positional text
+    position = position_map.get(position_text.lower(), -1)
+    
+    # If not found, try numeric format (e.g., "item 1")
+    if position == -1:
+        match = re.match(r'^item\s+(\d+)$', position_text.lower())
+        if match:
+            position = int(match.group(1)) - 1  # Convert to 0-based index
+    
+    # If it's just a number, try that
+    if position == -1:
+        try:
+            position = int(position_text) - 1  # Assume it's a 1-based index
+        except (ValueError, TypeError):
+            pass
+    
+    # If still not found, it's not a positional reference
+    if position == -1:
+        return None
+        
+    # Get the items for the checklist
+    url = f"https://api.trello.com/1/checklists/{checklist_id}/checkItems"
+    query = {
+        'key': trello_api_key,
+        'token': trello_token
+    }
+    
+    response = requests.get(url, params=query)
+    
+    if response.status_code == 200:
+        items = response.json()
+        
+        # Debug info
+        print(f"Looking for the {position_text} item (index {position}) in checklist {checklist_id}")
+        print(f"Found {len(items)} items in checklist {checklist_id}")
+        for i, item in enumerate(items):
+            print(f"Item {i+1}: '{item.get('name', '')}' (ID: {item.get('id', '')})")
+        
+        # Check if the position is valid
+        if 0 <= position < len(items):
+            item = items[position]
+            print(f"✅ Using positional match: '{item.get('name', '')}' as the {position_text} item")
+            return item.get("id")
+        else:
+            print(f"❌ Position out of range: {position_text} (index {position}). Only {len(items)} items available.")
+            return None
+    else:
+        print(f"❌ Failed to fetch checklist items: {response.text}")
+        return None
+
+def find_checklist_item_by_name(checklist_id, item_name):
+    """
+    Find a checklist item by its name.
+
+    Args:
+        checklist_id (str): The ID of the checklist.
+        item_name (str): The name of the item to find.
+
+    Returns:
+        str or None: The ID of the checklist item if found, None otherwise.
+    """
+    # Check if it's a positional reference like "third item"
+    position_match = re.match(r'^(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th|sixth|seventh|eighth|ninth|tenth|6th|7th|8th|9th|10th)\s+(item)$', item_name.lower())
+    if position_match:
+        position_text = position_match.group(1)
+        item_id = find_checklist_item_by_position(checklist_id, position_text)
+        if item_id:
+            return item_id
+    
+    # Check if it's a numeric reference like "item 3"
+    num_match = re.match(r'^item\s+(\d+)$', item_name.lower())
+    if num_match:
+        position_text = num_match.group(1)
+        item_id = find_checklist_item_by_position(checklist_id, position_text)
+        if item_id:
+            return item_id
+            
+    # If the item_name is just a number, treat it as a position
+    if item_name.isdigit():
+        item_id = find_checklist_item_by_position(checklist_id, item_name)
+        if item_id:
+            return item_id
+
+    trello_api_key = os.getenv("TRELLO_API_KEY")
+    trello_token = os.getenv("TRELLO_TOKEN")
+
+    url = f"https://api.trello.com/1/checklists/{checklist_id}/checkItems"
+    query = {
+        'key': trello_api_key,
+        'token': trello_token
+    }
+
+    response = requests.get(url, params=query)
+
+    if response.status_code == 200:
+        items = response.json()
+        
+        # Debug info
+        print(f"Found {len(items)} items in checklist {checklist_id}")
+        for item in items:
+            print(f"Available item: '{item.get('name', '')}' (ID: {item.get('id', '')})")
+        
+        # Case-insensitive exact match
+        for item in items:
+            if item.get("name", "").lower() == item_name.lower():
+                return item.get("id")
+            
+        # Try fuzzy matching
+        if items:
+            item_names = [i.get('name', '') for i in items]
+            best_match, similarity = get_best_fuzzy_match(item_name, item_names, threshold=0.6)
+            
+            if best_match:
+                # Find the ID for the best match
+                for item in items:
+                    if item.get("name", "") == best_match:
+                        print(f"✓ Using fuzzy match: '{best_match}' for '{item_name}' (similarity: {similarity:.2f})")
+                        return item.get("id")
+                
+        print(f"❌ Checklist item not found: '{item_name}' - Available items: {[i.get('name', '') for i in items]}")
+        return None
+    else:
+        print(f"❌ Failed to fetch checklist items: {response.text}")
+        return None
+
+# New function to update a checklist item state (complete/incomplete)
+def update_checklist_item(card_id, checklist_name, item_name, state):
+    """
+    Update a checklist item's state in a Trello card.
+    If the item doesn't exist, create it first.
+
+    Args:
+        card_id (str): The ID of the card.
+        checklist_name (str): The name of the checklist.
+        item_name (str): The name of the item to update.
+        state (str): The new state ('complete' or 'incomplete').
+
+    Returns:
+        bool: True if the item was updated successfully, False otherwise.
+    """
+    trello_api_key = os.getenv("TRELLO_API_KEY")
+    trello_token = os.getenv("TRELLO_TOKEN")
+
+    print(f"🔍 Looking for checklist '{checklist_name}' in card {card_id}")
+    # Find the checklist
+    checklist_id = find_checklist_by_name(card_id, checklist_name)
+    if not checklist_id:
+        print(f"❌ Checklist not found: '{checklist_name}'")
+        print(f"   Did you mean one of the available checklists? Try using the exact name.")
+        return False
+
+    print(f"🔍 Looking for item '{item_name}' in checklist {checklist_id}")
+    # Find the item
+    item_id = find_checklist_item_by_name(checklist_id, item_name)
+    
+    # If item doesn't exist, create it first
+    if not item_id:
+        print(f"⚠️ Item '{item_name}' not found in checklist. Creating it first.")
+        
+        # Create the item
+        create_success = add_checklist_item(checklist_id, item_name)
+        if not create_success:
+            print(f"❌ Failed to create item '{item_name}' in checklist")
+            return False
+            
+        # Find the newly created item
+        item_id = find_checklist_item_by_name(checklist_id, item_name)
+        if not item_id:
+            print(f"❌ Failed to find newly created item '{item_name}'")
+            return False
+
+    # Update the item state
+    url = f"https://api.trello.com/1/cards/{card_id}/checkItem/{item_id}"
+    state_value = 'complete' if state.lower() == 'complete' or state.lower() == 'done' else 'incomplete'
+    
+    query = {
+        'key': trello_api_key,
+        'token': trello_token,
+        'state': state_value
+    }
+
+    print(f"📝 Updating checklist item '{item_name}' to state '{state_value}'")
+    response = requests.put(url, params=query)
+
+    if response.status_code == 200:
+        print(f"✅ Updated checklist item '{item_name}' to state '{state_value}'")
+        return True
+    else:
+        print(f"❌ Failed to update checklist item: {response.text}")
+        print(f"❌ Response status code: {response.status_code}")
+        print(f"❌ Request URL: {url}")
+        print(f"❌ Request params: {query}")
+        return False
+
+# New function to delete a checklist item
+def delete_checklist_item(card_id, checklist_name, item_name):
+    """
+    Delete a checklist item from a Trello card.
+
+    Args:
+        card_id (str): The ID of the card.
+        checklist_name (str): The name of the checklist.
+        item_name (str): The name of the item to delete.
+
+    Returns:
+        bool: True if the item was deleted successfully, False otherwise.
+    """
+    trello_api_key = os.getenv("TRELLO_API_KEY")
+    trello_token = os.getenv("TRELLO_TOKEN")
+
+    print(f"🔍 Looking for checklist '{checklist_name}' in card {card_id}")
+    # Find the checklist
+    checklist_id = find_checklist_by_name(card_id, checklist_name)
+    if not checklist_id:
+        print(f"❌ Checklist not found: '{checklist_name}'")
+        print(f"   Did you mean one of the available checklists? Try using the exact name.")
+        return False
+
+    print(f"🔍 Looking for item '{item_name}' in checklist {checklist_id}")
+    # Find the item
+    item_id = find_checklist_item_by_name(checklist_id, item_name)
+    if not item_id:
+        print(f"❌ Checklist item not found: '{item_name}'")
+        print(f"   Did you mean one of the available items? Try using the exact name.")
+        return False
+
+    # Delete the item
+    url = f"https://api.trello.com/1/checklists/{checklist_id}/checkItems/{item_id}"
+    query = {
+        'key': trello_api_key,
+        'token': trello_token
+    }
+
+    print(f"🗑️ Deleting checklist item '{item_name}'")
+    response = requests.delete(url, params=query)
+
+    if response.status_code == 200:
+        print(f"✅ Deleted checklist item '{item_name}'")
+        return True
+    else:
+        print(f"❌ Failed to delete checklist item: {response.text}")
+        print(f"❌ Response status code: {response.status_code}")
+        print(f"❌ Request URL: {url}")
+        print(f"❌ Request params: {query}")
+        return False
+
+# New function to delete an entire checklist
+def delete_checklist(card_id, checklist_name):
+    """
+    Delete an entire checklist from a Trello card.
+
+    Args:
+        card_id (str): The ID of the card.
+        checklist_name (str): The name of the checklist to delete.
+
+    Returns:
+        bool: True if the checklist was deleted successfully, False otherwise.
+    """
+    trello_api_key = os.getenv("TRELLO_API_KEY")
+    trello_token = os.getenv("TRELLO_TOKEN")
+
+    # Find the checklist
+    checklist_id = find_checklist_by_name(card_id, checklist_name)
+    if not checklist_id:
+        print(f"❌ Checklist not found: {checklist_name}")
+        return False
+
+    # Delete the checklist
+    url = f"https://api.trello.com/1/checklists/{checklist_id}"
+    query = {
+        'key': trello_api_key,
+        'token': trello_token
+    }
+
+    response = requests.delete(url, params=query)
+
+    if response.status_code == 200:
+        print(f"✅ Deleted checklist '{checklist_name}'")
+        return True
+    else:
+        print(f"❌ Failed to delete checklist: {response.text}")
+        return False
+
+# New function to add items to an existing checklist
+def add_items_to_checklist(card_id, checklist_name, items, force_new=False):
+    """
+    Add items to an existing checklist in a Trello card.
+    If the checklist doesn't exist or force_new is True, create a new checklist.
+
+    Args:
+        card_id (str): The ID of the Trello card.
+        checklist_name (str): The name of the checklist.
+        items (list): A list of items to add to the checklist.
+        force_new (bool): If True, always create a new checklist even if one with the same name exists.
+
+    Returns:
+        bool: True if the items were added successfully, False otherwise.
+    """
+    trello_api_key = os.getenv("TRELLO_API_KEY")
+    trello_token = os.getenv("TRELLO_TOKEN")
+
+    # Check if the checklist already exists
+    print(f"🔍 Checking if checklist '{checklist_name}' exists in card {card_id}")
+    existing_checklist_id = find_checklist_by_name(card_id, checklist_name)
+    
+    if existing_checklist_id and not force_new:
+        print(f"✅ Found existing checklist: '{checklist_name}' (ID: {existing_checklist_id})")
+        success = True
+        
+        # Add items to the existing checklist
+        for item in items:
+            item_success = add_checklist_item(existing_checklist_id, item)
+            success = success and item_success
+            
+        return success
+    else:
+        if force_new:
+            print(f"⚠️ Force creating a new checklist '{checklist_name}' even though one might exist.")
+        else:
+            print(f"⚠️ Checklist '{checklist_name}' not found. Creating a new one.")
+        return create_checklist(card_id, checklist_name, items)
+
 def handle_task_operations_trello(operations):
     """Handle task operations for Trello"""
     results = []
@@ -792,6 +1361,148 @@ def handle_task_operations_trello(operations):
                     'member': op.get('member'),
                     'success': success
                 })
+            
+            # Handle create_checklist operation
+            elif operation_type == 'create_checklist':
+                card_id = find_card_by_name(op.get('card', ''))
+                if card_id:
+                    try:
+                        # Check if force_new flag is set
+                        force_new = op.get('force_new', False)
+                        
+                        # Use add_items_to_checklist with force_new flag
+                        success = add_items_to_checklist(
+                            card_id, 
+                            op.get('checklist', 'Checklist'), 
+                            op.get('items', []),
+                            force_new=force_new
+                        )
+                        results.append({
+                            'operation': 'create_checklist' if force_new else ('add_to_checklist' if success else 'create_checklist'),
+                            'card': op.get('card'),
+                            'checklist': op.get('checklist'),
+                            'success': success
+                        })
+                    except Exception as e:
+                        error_message = str(e)
+                        print(f"❌ Exception handling checklist: {error_message}")
+                        results.append({
+                            'operation': 'create_checklist',
+                            'card': op.get('card'),
+                            'checklist': op.get('checklist'),
+                            'success': False,
+                            'error': error_message
+                        })
+                else:
+                    error_message = f"Card not found: {op.get('card')}"
+                    print(f"❌ {error_message}")
+                    results.append({
+                        'operation': 'create_checklist',
+                        'card': op.get('card'),
+                        'success': False,
+                        'error': error_message
+                    })
+            
+            # Handle update_checklist_item operation
+            elif operation_type == 'update_checklist_item':
+                card_id = find_card_by_name(op.get('card', ''))
+                if card_id:
+                    try:
+                        success = update_checklist_item(
+                            card_id,
+                            op.get('checklist', ''),
+                            op.get('item', ''),
+                            op.get('state', 'incomplete')
+                        )
+                        results.append({
+                            'operation': 'update_checklist_item',
+                            'card': op.get('card'),
+                            'checklist': op.get('checklist'),
+                            'item': op.get('item'),
+                            'state': op.get('state'),
+                            'success': success
+                        })
+                    except Exception as e:
+                        error_message = str(e)
+                        print(f"❌ Exception updating checklist item: {error_message}")
+                        results.append({
+                            'operation': 'update_checklist_item',
+                            'card': op.get('card'),
+                            'checklist': op.get('checklist'),
+                            'item': op.get('item'),
+                            'success': False,
+                            'error': error_message
+                        })
+                else:
+                    error_message = f"Card not found: {op.get('card')}"
+                    print(f"❌ {error_message}")
+                    results.append({
+                        'operation': 'update_checklist_item',
+                        'card': op.get('card'),
+                        'success': False,
+                        'error': error_message
+                    })
+            
+            # Handle delete_checklist_item operation
+            elif operation_type == 'delete_checklist_item':
+                card_id = find_card_by_name(op.get('card', ''))
+                if card_id:
+                    try:
+                        success = delete_checklist_item(
+                            card_id,
+                            op.get('checklist', ''),
+                            op.get('item', '')
+                        )
+                        results.append({
+                            'operation': 'delete_checklist_item',
+                            'card': op.get('card'),
+                            'checklist': op.get('checklist'),
+                            'item': op.get('item'),
+                            'success': success
+                        })
+                    except Exception as e:
+                        error_message = str(e)
+                        print(f"❌ Exception deleting checklist item: {error_message}")
+                        results.append({
+                            'operation': 'delete_checklist_item',
+                            'card': op.get('card'),
+                            'checklist': op.get('checklist'),
+                            'item': op.get('item'),
+                            'success': False,
+                            'error': error_message
+                        })
+                else:
+                    error_message = f"Card not found: {op.get('card')}"
+                    print(f"❌ {error_message}")
+                    results.append({
+                        'operation': 'delete_checklist_item',
+                        'card': op.get('card'),
+                        'success': False,
+                        'error': error_message
+                    })
+            
+            # Handle delete_checklist operation
+            elif operation_type == 'delete_checklist':
+                card_id = find_card_by_name(op.get('card', ''))
+                if card_id:
+                    success = delete_checklist(
+                        card_id,
+                        op.get('checklist', '')
+                    )
+                    results.append({
+                        'operation': 'delete_checklist',
+                        'card': op.get('card'),
+                        'checklist': op.get('checklist'),
+                        'success': success
+                    })
+                else:
+                    print(f"❌ Card not found: {op.get('card')}")
+                    results.append({
+                        'operation': 'delete_checklist',
+                        'card': op.get('card'),
+                        'success': False,
+                        'error': 'Card not found'
+                    })
             
             else:
                 print(f"❌ Unknown operation type: {operation_type}")
@@ -898,6 +1609,56 @@ def format_operation_summary_trello(results):
                 error = result.get('error', 'Unknown error')
                 summary += f"❌ Failed to remove member: {member} ← {task} - {error}\n"
         
+        # Add summary for checklist operations
+        elif operation == 'create_checklist':
+            card = result.get('card', 'Unknown card')
+            checklist = result.get('checklist', 'Unknown checklist')
+            if success:
+                summary += f"✅ Created checklist: {checklist} in {card}\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ Failed to create checklist: {checklist} in {card} - {error}\n"
+        
+        # Add summary for add_to_checklist operations
+        elif operation == 'add_to_checklist':
+            card = result.get('card', 'Unknown card')
+            checklist = result.get('checklist', 'Unknown checklist')
+            if success:
+                summary += f"✅ Added items to existing checklist: {checklist} in {card}\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ Failed to add items to checklist: {checklist} in {card} - {error}\n"
+        
+        elif operation == 'update_checklist_item':
+            card = result.get('card', 'Unknown card')
+            checklist = result.get('checklist', 'Unknown checklist')
+            item = result.get('item', 'Unknown item')
+            state = result.get('state', 'Unknown state')
+            if success:
+                summary += f"✅ Updated checklist item: '{item}' in '{checklist}' to {state}\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ Failed to update checklist item: '{item}' in '{checklist}' - Error: {error}\n"
+                
+        elif operation == 'delete_checklist_item':
+            card = result.get('card', 'Unknown card')
+            checklist = result.get('checklist', 'Unknown checklist')
+            item = result.get('item', 'Unknown item')
+            if success:
+                summary += f"✅ Deleted checklist item: '{item}' from '{checklist}'\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ Failed to delete checklist item: '{item}' from '{checklist}' - {error}\n"
+                
+        elif operation == 'delete_checklist':
+            card = result.get('card', 'Unknown card')
+            checklist = result.get('checklist', 'Unknown checklist')
+            if success:
+                summary += f"✅ Deleted checklist: '{checklist}' from '{card}'\n"
+            else:
+                error = result.get('error', 'Unknown error')
+                summary += f"❌ Failed to delete checklist: '{checklist}' from '{card}' - {error}\n"
+        
         else:
             if success:
                 summary += f"✅ {operation.capitalize()} operation successful\n"
@@ -981,3 +1742,43 @@ def adjust_timezone_for_trello(iso_date_string):
             print(f"⚠️ Could not parse ISO date: {iso_date_string}")
             return iso_date_string
     return iso_date_string
+
+def get_best_fuzzy_match(target, candidates, threshold=0.75):
+    """
+    Find the best fuzzy match from a list of candidates for a target string.
+    
+    Args:
+        target (str): The string to match against.
+        candidates (list): List of candidate strings to match.
+        threshold (float): Minimum similarity ratio to consider a match (0.0 to 1.0).
+        
+    Returns:
+        tuple: (best_match, similarity_ratio) or (None, 0) if no match above threshold.
+    """
+    if not target or not candidates:
+        return None, 0
+    
+    # Convert to lowercase for case-insensitive matching
+    target = target.lower()
+    
+    # First check for exact match
+    for candidate in candidates:
+        if candidate.lower() == target:
+            return candidate, 1.0
+    
+    # Then check for contained match
+    for candidate in candidates:
+        if target in candidate.lower() or candidate.lower() in target:
+            # Calculate how much of one string is contained in the other
+            similarity = len(min(target, candidate.lower(), key=len)) / len(max(target, candidate.lower(), key=len))
+            if similarity >= threshold:
+                return candidate, similarity
+    
+    # Finally use difflib for fuzzy matching
+    matches = difflib.get_close_matches(target, candidates, n=1, cutoff=threshold)
+    if matches:
+        best_match = matches[0]
+        ratio = difflib.SequenceMatcher(None, target, best_match.lower()).ratio()
+        return best_match, ratio
+    
+    return None, 0

@@ -3,7 +3,7 @@ import json
 import re
 import os
 from datetime import datetime
-from api.trello_handler import fetch_cards, fetch_board_members, format_board_state, fetch_labels
+from api.trello_handler import fetch_cards, fetch_board_members, format_board_state, fetch_labels, create_checklist, find_card_by_name
 
 def extract_tasks_trello(transcription, is_streaming=False):
     """Extract tasks and operations from transcription for Trello"""
@@ -70,6 +70,13 @@ def extract_tasks_trello(transcription, is_streaming=False):
         6. Create or assign labels to tasks (Labels are broad-level categories that group tasks together, similar to epics)
         7. Assign members to tasks
         8. Remove members from tasks
+        9. Create checklists in tasks (checklists are sub-tasks or items within a task)
+        10. Update checklists status in tasks
+        11. Delete checklists in tasks
+        
+        IMPORTANT: When a user talks about marking checklist items as done or complete, do NOT change the status of the parent task/card unless explicitly requested. Changing the status of checklist items should not affect the overall task status.
+        
+        IMPORTANT FOR NAMES: Users may make small typos in checklist or item names. The system can handle minor typos, but try to be as accurate as possible when extracting names. If the user mentions "Fun Checklist" but it's actually "Fun CheckList", be flexible with the name extraction.
         
         Pay special attention to rename operations which may use phrases like:
         - "update task name X to Y"
@@ -88,14 +95,77 @@ def extract_tasks_trello(transcription, is_streaming=False):
         - "X is no longer working on Y"
         - "take X off task Y"
 
+        For checklist creation, listen for phrases like:
+        - "add Y as an item in the Z checklist for task X"
+        - "add a new checklist for task X"
+        - "create a checklist named Y for task X"
+        - "create a checklist for task X"
+        - "create a checklist for task X with items Y and Z"
+        - "add items to the checklist of task X"
+        - "add Y and Z to the checklist in task X"
+        - "add new items Y and Z to task X's checklist"
+        - "add Y as a new item in task X"
+
+        IMPORTANT: When users mention adding items to a checklist for a task, try to add them to an existing checklist first rather than creating a new checklist every time. If the task already has a checklist, add the new items to that checklist instead of creating a new one.
+        
+        HOWEVER, if the user explicitly asks to create a "new checklist", you should create a new checklist rather than adding to an existing one. Pay attention to phrases like "create a new checklist" which indicate the user wants a fresh checklist.
+        
+        For checklist update, listen for phrases like:
+        - "the item Y in the Z checklist for task X is done"
+        - "delete the item Y in the Z checklist for task X"
+        - "we don't need Y in the Z checklist for task X anymore"
+        - "remove Y from the Z checklist for task X"
+        - "mark Y in the Z checklist for task X as done"
+        - "mark Y in the Z checklist for task X as not done"
+        - "Y in the Z checklist for task X is done"
+        - "Y in the Z checklist for task X is not done"
+        - "set the third item of the first checklist to done"
+        - "mark the second item in the first checklist as complete"
+        - "update the fourth item in the third checklist to done"
+
+        IMPORTANT: The system can handle positional references to checklists and items. For example:
+        - "first checklist" refers to the first checklist in the card
+        - "second checklist" refers to the second checklist in the card
+        - "third item" refers to the third item in a checklist
+        - "set the third item of the first checklist to done" will mark the third item in the first checklist as complete
+        - "update the second item in checklist 1 to done" will mark the second item in the first checklist as complete
+        
+        IMPORTANT FOR NEW ITEMS: When a user asks to add a new item to a checklist AND set its state (e.g., "add a new item called X to the checklist and set it to done"), interpret this as an "update_checklist_item" operation. The system will create the item if it doesn't exist and then update its state.
+
+        IMPORTANT: For checklist item deletion, listen carefully for phrases like:
+        - "delete the item Y in the Z checklist for task X"
+        - "remove Y from the Z checklist for task X"
+        - "delete Y from the Z checklist"
+        - "remove the item Y from the checklist in task X"
+        These should be processed as "delete_checklist_item" operations, NOT as "update_checklist_item" operations.
+        
+        IMPORTANT: When handling checklist item status updates (e.g., marking an item as done), do NOT change the overall task status unless explicitly requested. Checklist item status and task status are separate concepts.
+        
+        For checklist deletion, listen for phrases like:
+        - "delete the Z checklist for task X"
+        - "delete the checklist for task X"
+
         Return ONLY a JSON array containing task operations. Each operation should have:
-        - "operation": "create", "update", "delete", "comment", "rename", "create_epic", "assign_epic", "assign_member", or "remove_member"
+        - "operation": "create", "update", "delete", "comment", "rename", "create_epic", "assign_epic", "assign_member", "remove_member", "create_checklist", "update_checklist_item", or "delete_checklist_item"
         - Appropriate fields for that operation type
 
         For rename operations, you MUST include:
         - "operation": "rename"
         - "old_name": "exact existing task name"
         - "new_name": "new task name"
+
+        For updating a checklist item status, you MUST include:
+        - "operation": "update_checklist_item"
+        - "card": "exact card name"
+        - "checklist": "exact checklist name"
+        - "item": "exact item name"
+        - "state": "complete" or "incomplete"
+        
+        For deleting a checklist item, you MUST include:
+        - "operation": "delete_checklist_item"
+        - "card": "exact card name"
+        - "checklist": "exact checklist name"
+        - "item": "exact item name"
 
         For creating a new label, you MUST include:
         - "operation": "create_epic"
@@ -125,7 +195,7 @@ def extract_tasks_trello(transcription, is_streaming=False):
 
         Example label operations:
         {{
-            "operation": "create_epic",
+"operation": "create_epic",
             "epic": "ShopTalk"
         }}
         {{
@@ -145,6 +215,47 @@ def extract_tasks_trello(transcription, is_streaming=False):
             "task": "Update documentation",
             "member": "Jane Doe"
         }}
+
+        Example checklist operation:
+        {{
+            "operation": "create_checklist",
+            "card": "Design new landing page",
+            "checklist": "To-Do List",
+            "items": ["Research competitors", "Create wireframes", "Review with team"]
+        }}
+
+        Example for explicitly creating a new checklist (even if one exists):
+        {{
+            "operation": "create_checklist",
+            "card": "Design new landing page",
+            "checklist": "New Checklist Name",
+            "items": ["First item", "Second item"],
+            "force_new": true
+        }}
+
+        Example checklist item status update:
+        {{
+            "operation": "update_checklist_item",
+            "card": "Design new landing page",
+            "checklist": "To-Do List",
+            "item": "Research competitors",
+            "state": "complete"
+        }}
+
+        Example checklist item deletion:
+        {{
+            "operation": "delete_checklist_item",
+            "card": "Design new landing page",
+            "checklist": "To-Do List",
+            "item": "Research competitors"
+        }}
+
+        Example scenarios for creating and immediately setting an item's state:
+        - "Add a new item called 'Review PR' to the first checklist and mark it as done"
+        - "In the Development checklist, create a new item 'Setup CI/CD' and set it to complete"
+        - "Add 'Test Coverage' to the second checklist and mark it as done"
+        
+        All of these should generate an "update_checklist_item" operation, and the system will handle creating the item first.
 
         Other operation examples:
         [
@@ -169,7 +280,7 @@ def extract_tasks_trello(transcription, is_streaming=False):
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": "You are a project management AI. Extract tasks from spoken input. Return ONLY valid JSON."},
+                {"role": "system", "content": "You are a project management AI. Extract tasks from spoken input. When adding checklist items, prefer adding to existing checklists rather than creating new ones UNLESS the user explicitly requests a 'new checklist'. In that case, use force_new:true. IMPORTANT: When the user asks to delete or remove an item from a checklist, use the delete_checklist_item operation, NOT update_checklist_item. IMPORTANT: The system can handle positional references like 'first checklist' and 'third item', so interpret these correctly when extracting operations. IMPORTANT: When a user asks to add a new item to a checklist AND set its state, use update_checklist_item operation - the system will create the item if needed. Return ONLY valid JSON."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1
@@ -230,6 +341,16 @@ def extract_tasks_trello(transcription, is_streaming=False):
                             print(f"  {i}. Assign Member: {op.get('member', 'unknown')} to {op.get('task', 'unknown')}")
                         elif op_type == "remove_member":
                             print(f"  {i}. Remove Member: {op.get('member', 'unknown')} from {op.get('task', 'unknown')}")
+                        elif op_type == "create_checklist":  # New checklist operation
+                            card_name = op.get("card", "unknown")
+                            checklist_name = op.get("checklist", "Checklist")
+                            items = op.get("items", [])
+                            print(f"  {i}. Create checklist: '{checklist_name}' in '{card_name}' with items: {items}")
+                        elif op_type == "delete_checklist_item":
+                            card_name = op.get("card", "unknown")
+                            checklist_name = op.get("checklist", "Checklist")
+                            item_name = op.get("item", "unknown")
+                            print(f"  {i}. Delete checklist item: '{item_name}' from '{checklist_name}' in '{card_name}'")
                         else:
                             print(f"  {i}. {op_type.capitalize()}: {op}")
                 else:

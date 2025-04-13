@@ -3,6 +3,7 @@ Transcription module for converting audio to text
 """
 from openai import OpenAI
 import os
+from datetime import datetime
 
 def transcribe_audio(audio_file):
     """
@@ -41,6 +42,16 @@ def transcribe_audio(audio_file):
         print("-" * 50)
         print(transcript.text)
         print("-" * 50 + "\n")
+
+        # Save transcription to file
+        try:
+            with open("/Users/shivpanjwani/Downloads/V2N_TEXT_TEST.txt", "a") as file:
+                file.write(f"\n\n--- Transcription: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+                file.write(transcript.text)
+                file.write("\n" + "-"*50)
+            print("✅ Transcription saved to file")
+        except Exception as e:
+            print(f"❌ Error saving transcription to file: {str(e)}")
 
         return transcript.text
 

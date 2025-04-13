@@ -183,7 +183,7 @@ def extract_tasks_trello(transcription, is_streaming=False):
         IMPORTANT: For "What's not going well?" cards, always include challenges as a numbered list in the desicription field and the associated lessons learned as numbered list in the comments field. 
         Note that for every challenge listed in the description field, there should be a corresponding lesson learned in the comments field.
         
-        IMPORTANT: For "What changes/ideas to make?" cards, create a new descriptive task name and add checklist items based on lessons learned from "What's not going well?" or new ideas mentioned.
+        IMPORTANT: For "What changes/ideas to make?" cards, create a new descriptive task name and add checklist items based on lessons learned from "What's not going well?" or new ideas mentioned.Additionall, the description field should be a descriptive synthesis of the lessons learned from the associated what's not going well card.
         Note that for every lesson learned listed in the comments field of the "What's not going well?" card, there should be a corresponding checklist item in the "What changes/ideas to make?" card.
 
         Return ONLY a JSON array containing task operations. Each operation should have:

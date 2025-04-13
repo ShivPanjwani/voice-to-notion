@@ -1645,29 +1645,29 @@ def handle_task_operations_trello(operations):
                     })
                     continue
                 
-                # Get task details
+                # Create a card with the task name
                 task_name = op.get('task_name', '')
+                description = op.get('description', '')  # Get the description from the operation
                 checklist_items = op.get('checklist_items', [])
                 
-                # Create the card
-                trello_api_key = os.getenv("TRELLO_API_KEY")
-                trello_token = os.getenv("TRELLO_TOKEN")
-                
                 try:
-                    url = "https://api.trello.com/1/cards"
+                    # Create the card
+                    trello_api_key = os.getenv("TRELLO_API_KEY")
+                    trello_token = os.getenv("TRELLO_TOKEN")
                     
-                    query = {
+                    card_url = "https://api.trello.com/1/cards"
+                    card_query = {
                         'key': trello_api_key,
                         'token': trello_token,
                         'idList': list_id,
-                        'name': task_name
+                        'name': task_name,
+                        'desc': description  # Add the description to the card creation request
                     }
                     
-                    response = requests.post(url, params=query)
-                    response.raise_for_status()
-                    
-                    # Get the card ID
-                    card_id = response.json().get('id')
+                    card_response = requests.post(card_url, params=card_query)
+                    card_response.raise_for_status()
+                    card_data = card_response.json()
+                    card_id = card_data.get('id')
                     
                     # Add checklist items
                     if card_id and checklist_items:

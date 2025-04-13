@@ -127,6 +127,12 @@ def extract_tasks_trello(transcription, is_streaming=False):
         - "mark the second item in the first checklist as complete"
         - "update the fourth item in the third checklist to done"
 
+        IMPORTANT: When a user refers to "the checklist" without specifying a name, DO NOT use "Checklist" as the name. Instead:
+        1. If the item name within the checklist is mentioned, try to determine which checklist contains that item
+        2. If no item is mentioned or you can't determine which checklist contains the item, use the name of the first checklist in the card
+        3. NEVER use the literal name "Checklist" unless that's the actual name of a checklist in the card
+        
+        For example, if a user says "mark RVO Health as complete in the checklist for Sales Calls", and Sales Calls has a checklist named "List of Clients", you should use "List of Clients" as the checklist name, NOT "Checklist".
         IMPORTANT: The system can handle positional references to checklists and items. For example:
         - "first checklist" refers to the first checklist in the card
         - "second checklist" refers to the second checklist in the card
@@ -175,7 +181,7 @@ def extract_tasks_trello(transcription, is_streaming=False):
         - "changes we need to make for [task name]"
         - "ideas for improving [task name]"
         
-        IMPORTANT: Every cardin the "What's going well?" and "What's not going well?" columns must match exactly with an existing task name from the "Not started", "In Progress", or "Done" columns.
+        IMPORTANT: Every card in the "What's going well?" and "What's not going well?" columns must match exactly with an existing task name from the "Not started", "In Progress", or "Done" columns.
         The idea is that every card in the "What's going well?" and "What's not going well?" columns should be a reflection (associated with) of a task in the "Not started", "In Progress", or "Done" columns.
         
         IMPORTANT: For "What's going well?" cards, always include positive aspects as a numbered list in the description field. 
@@ -185,6 +191,8 @@ def extract_tasks_trello(transcription, is_streaming=False):
         
         IMPORTANT: For "What changes/ideas to make?" cards, create a new descriptive task name and add checklist items based on lessons learned from "What's not going well?" or new ideas mentioned.Additionall, the description field should be a descriptive synthesis of the lessons learned from the associated what's not going well card.
         Note that for every lesson learned listed in the comments field of the "What's not going well?" card, there should be a corresponding checklist item in the "What changes/ideas to make?" card.
+
+        Important: There should be no duplicate cards in the "What's going well?" and "What's not going well?" columns. If the user mentions a reflection item related to a card that already exists in the "What's going well?" or "What's not going well?" columns, do not create a new card. Instead, update the existing card with the new reflection item.
 
         Return ONLY a JSON array containing task operations. Each operation should have:
         - "operation": "create", "update", "delete", "comment", "rename", "create_epic", "assign_epic", "assign_member", "remove_member", "create_checklist", "update_checklist_item", or "delete_checklist_item"
@@ -216,12 +224,12 @@ def extract_tasks_trello(transcription, is_streaming=False):
 
         For adding positive reflections (what's going well), you MUST include:
         - "operation": "add_reflection_positive"
-        - "task": "exact task name"
+        - "task": "exact task name" (Note this could be a duplicate of a card in the "What's going well?" column. In this case, do not create a new card. Instead, update the existing card with the new reflection item.)
         - "items": ["item 1", "item 2", ...] - List of things going well
 
         For adding negative reflections (what's not going well), you MUST include:
         - "operation": "add_reflection_negative"
-        - "task": "exact task name"
+        - "task": "exact task name" (Note this could be a duplicate of a card in the "What's going well?" column. In this case, do not create a new card. Instead, update the existing card with the new reflection item.)
         - "issues": ["issue 1", "issue 2", ...] - List of things not going well
         - "lessons_learned": ["lesson 1", "lesson 2", ...] - List of lessons learned from issues
 
